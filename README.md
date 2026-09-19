@@ -1,432 +1,201 @@
 <div align="center">
 
-<img src="logo.png" width="120" alt="Firefox-Reverse logo">
+# browser-agent-mcp
 
-# Firefox‑Reverse
+**面向网页算法分析的 Firefox 内置 Agent 与隔离环境工具链**
 
-**一个内置 AI 逆向 Agent 与指纹环境管理器的 Firefox**
+从浏览器内核观测、网络请求定位到 Node.js / Python 独立实现，项目将分析、验证和交付串成一条可持续执行的工作流；同时提供按 profile 与进程隔离的浏览器环境管理能力。
 
-既能把网页里的加密 / 签名 / 风控参数从「黑盒」做成可独立运行的 Node.js / Python 算法，也能用独立 profile、独立进程管理隔离的浏览器指纹环境。
-
-<br>
-
-![Firefox](https://img.shields.io/badge/Firefox-153.0a1-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white)
-![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
-
-![AI](https://img.shields.io/badge/AI-DeepSeek_·_GLM_·_Kimi_·_MiniMax_·_Qwen_·_Claude_·_OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white)
-![Engine](https://img.shields.io/badge/hooks-SpiderMonkey_C++-8957E5?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MPL_2.0-2EA043?style=for-the-badge)
-
-<br>
-
-[**📥 下载安装（Releases）**](../../releases)　·　[快速开始](#-快速开始5-步)　·　[指纹环境](#-使用指纹环境可选)　·　[工具大全](#-工具大全68)　·　[从源码构建](#-从源码构建)
+[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#68-项内置工具) · [源码构建](#源码构建)
 
 </div>
 
 ---
 
-## 概述
+## 项目定位
 
-很多网站发请求时会带一个**加密参数**——签名 `sign`、令牌 `token`、风控指纹等。想在浏览器之外（你自己的 Node / Python 脚本里）复现这个请求，就得搞清楚这个参数**是怎么算出来的**。这就是 **JS 逆向**，而它通常很难：逻辑被**混淆**、塞进 **JSVMP（JS 虚拟机保护）**、或编译成 **WASM**，还深度依赖一堆**浏览器环境指纹**。传统做法要在 DevTools 里手动下断点、补环境、反复试值，耗时且容易兜圈。
+网页请求中的 sign、token、设备特征或风控字段，往往不是固定值，而是由混淆 JavaScript、JSVMP 字节码、WASM 模块以及浏览器状态共同计算。要把这类请求迁移到浏览器之外，分析者不仅要找到生成入口，还需要复原运行上下文，并用真实接口响应验证结果。
 
-**Firefox‑Reverse 把这套活儿交给一个内置的 AI Agent。** 它住在浏览器侧边栏里，能像一名专业逆向工程师那样**自己**抓包、读代码、在**引擎 C++ 内核层**观测、补环境、写脚本、实打接口验证——目标是把一个加密参数还原成**你能在 Node.js / Python 里独立运行的算法**。
+browser-agent-mcp 将这些环节放进 Firefox 侧边栏中的常驻 Agent。它可以连续完成网络流量记录、代码检索、内核探针观测、运行环境重建、脚本生成和接口回放，最终产出能够在 Node.js 或 Python 中独立执行的实现。
 
-除了逆向 Agent，浏览器还内置了**指纹环境管理**：每个环境使用独立 profile、独立 Firefox 进程和独立 Marionette 端口，可在侧边栏完成新建、导入、编辑、打开、关闭与删除；环境配置在进程启动时交给 C++ 配置层读取。
+项目还包含指纹环境管理器。每个环境绑定自己的 Firefox profile、浏览器进程与 Marionette 端口，Cookie、缓存、站点存储和配置分别持久化；创建、导入、编辑、启动和销毁均可从侧边栏或工具接口完成。
 
-> 与「AI + 普通浏览器自动化」最大的不同：关键观测工具（签名器入参追踪 / JSVMP 逐指令 trace / WASM import 边界 / 引擎级分支差分）深入 **SpiderMonkey/Gecko 的 C++ 引擎**，不依赖页面内 monkey patch，页面 JS 很难通过常规反射干扰这些观测点。
+这里的核心差异不是“让 AI 操作网页”，而是让分析探针进入 SpiderMonkey 与 Gecko：签名函数参数、JSVMP 指令轨迹、WASM import 边界以及浏览器与本地复刻之间的分支偏差，都可以在 C++ 层采集。由于不依赖页面脚本中的 monkey patch，普通反射与常见反调试逻辑更难干扰观测结果。
 
----
+## 能力概览
 
-## 功能预览
-
-### 内置 AI Agent
-
-<img src="docs/agent-sidebar-guide-20260715.png" width="100%" alt="Firefox-Reverse 内置 AI Agent 侧边栏、星光入口和环境管理入口指引">
-
-- Agent 常驻浏览器侧边栏，当前精确注册 **68 个工具**，覆盖页面操作、网络抓包、代码搜索、Cookie、WebAPI trace、JSVMP、WASM、文件读写、Skills、扩展与环境管理及 Node/Python 实打验证。
-- 支持**全自动**与**AI辅助**两种工作方式：既可以让 worker 独立推进，也可以由人或外部 MCP director 分阶段领航。
-- 工作目录、会话、阶段结论与生成脚本均落在本地；切换标签页或收起侧边栏不会中断正在运行的父进程 Agent。
-- 历史抽屉支持单会话 `.frx-chat.json` 导入/导出；导入会创建静止的新会话，不会自动执行历史任务，也不会携带 API Key、工作目录和环境绑定。
-- 模型设置支持命名配置，同一渠道可以保存多组账号、端点、模型与思考等级，后续直接从历史配置切换。
-- 手动停止会留下明确的取消边界，下一条消息默认按新任务处理；只有明确要求继续时才恢复上一项任务。
-- 支持从用户目录和工作区发现通用 `SKILL.md`，用户说“使用某个 Skill”后，Agent 会按需读取方法与附加资源。
-- 支持搜索 AMO 扩展、查看已安装状态，并经 Firefox 原生 AddonManager 安装、启停、卸载和打开配置页；配置页可继续用现有页面工具自动填写。
-
-### 指纹环境管理
-
-<img src="docs/environment-manager-guide-20260715.png" width="100%" alt="Firefox-Reverse 指纹浏览器环境新建、运行状态和指纹导入操作指引">
-
-- 一个环境对应一个**独立 Firefox profile + 独立浏览器进程 + 独立 Marionette 端口**，Cookie、历史记录、LocalStorage、缓存和配置互不混用。
-- 在侧边栏中可新建、重命名、打开、关闭、删除和导入环境，并查看运行状态、端口、profile 与当前主进程指纹。
-- 新建环境只生成与当前 Gecko 内核一致的 Firefox 指纹，浏览器版本和系统跟随实际构建；默认中国大陆简体中文，也可编辑语言、地区与时区。
-- 支持粘贴导入 `fingerprint.json`，非 Firefox 采集结果会规范化为 Firefox 身份；也可修改当前主进程指纹并一键还原默认，配置在进程启动时由 C++ 层读取。
-- 当前 C++ 配置覆盖面包括 Navigator、Screen、DPR、语言/时区、UA 与 Accept-Language，以及 WebGL unmasked vendor/renderer 等字段。
-- 环境能力同时暴露为内置 `env_*` 工具；`frx-director-mcp` 通过对应的 `frx_env_*` MCP 工具查询、创建、导入和启动指定环境。
-
-> 当前采用**环境级隔离**，不是标签页级切换。新建和重新生成不再产出 Chrome-like 指纹，避免浏览器声明与 Gecko 内核能力不一致；历史环境不会被自动迁移或重写。指纹配置按进程启动读取，修改运行中环境后需关闭并重新打开才会完整生效。
+| 能力域 | 提供的能力 |
+|---|---|
+| 自主任务执行 | 父进程 Agent 可持续调用 68 项工具，侧边栏关闭、重载或切换标签页不会终止任务 |
+| 内核级分析 | 覆盖签名入口、闭包值、JSVMP 指令、WASM 边界、WebAPI 使用情况以及执行分支对比 |
+| 双模型协作 | worker 负责高频工具操作，director 负责阶段规划、审阅结论和调整方向 |
+| 环境隔离 | 每个环境独占 profile、进程和 Marionette 端口，并支持指纹配置的生成、导入与维护 |
+| 模型接入 | 支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Claude、OpenAI，以及兼容 OpenAI 或 Anthropic 协议的端点 |
+| 本地状态管理 | 会话、命名模型配置、工作产物、阶段笔记和 SQLite 记忆均在本机保存 |
+| 扩展与 Skills | 可发现用户或工作区 Skill，并通过 Firefox 原生 AddonManager 管理 AMO 扩展 |
 
 ---
 
-## 🚀 快速开始（5 步）
+## 快速开始
 
-**① 下载安装**
-到本仓库的 [**Releases**](../../releases) 页，按你的系统下载安装包：
+### 1. 打开侧边栏
 
-| 系统 | 文件 | 安装 |
+启动浏览器，点击右上角的 browser-agent-mcp 星光入口。若入口未显示，先通过地址栏附近的侧栏按钮展开浏览器侧栏。
+
+### 2. 建立模型配置
+
+在 Agent 面板右上角打开设置，新建一个命名配置并填写 Provider、API Key、模型与思考等级。同一 Provider 可以保存多套账号或端点，切换后从下一轮请求开始生效。
+
+低复杂度目标可以优先使用速度快、成本低的模型；遇到大型站点、长上下文或复杂控制流时，建议改用能力更强的模型，减少重复探索。
+
+### 3. 选择执行节奏
+
+创建新会话时选择一种模式：
+
+- **全自动**：给出目标后由 Agent 连续推进，适合边界清晰、可以后台执行的任务。
+- **AI 辅助**：Agent 在关键阶段暂停并给出候选方向，由用户或 director 决定下一步，适合复杂目标和教学场景。
+
+### 4. 描述目标与验收条件
+
+推荐同时给出页面、接口、动态字段和最终交付要求。例如：
+
+~~~text
+页面地址：https://example.com/list
+目标接口：GET https://example.com/api/v1/list?page=1
+待还原字段：请求头 X-Sign；同时关注时间戳、token 与设备信息
+验收目标：
+1. 生成可脱离浏览器运行的 Node.js 实现，并用真实接口返回值验证
+2. 在可行时继续整理为不依赖原混淆载荷的纯算法版本
+~~~
+
+会话生成的脚本、还原代码、采集结果与分析笔记都会写入该会话绑定的工作目录。
+
+---
+
+## worker / director 协作
+
+两种运行方式共享同一套工具和持久化数据，区别在于决策由谁驱动。
+
+| 维度 | 全自动 worker | director 引导 |
 |---|---|---|
-| **Windows** | `firefox-reverse-v*-windows-x86_64-installer.exe` 或 `.zip` | 运行安装器，或解压 ZIP 后双击 `firefox.exe`（若 SmartScreen 拦截 → 「更多信息」→「仍要运行」）|
-| **macOS (Apple Silicon)** | `firefox-reverse-*-macos-arm64.dmg` | 打开 → 拖进「应用程序」；**首次打开若提示「已损坏」见下方 ⚠️** |
-| **macOS (Intel)** | `firefox-reverse-*-macos-x86_64.dmg` | 适用于 Intel Mac（macOS 10.15+）；安装方式同上 |
-| **Linux (x86_64)** | `firefox-reverse-v*-linux-x86_64.tar.xz` | 解压，运行 `./firefox` |
-| **Linux (ARM64)** | `firefox-reverse-*-linux-arm64.tar.xz` | 适用于 ARM64 / AArch64 Linux；解压，运行 `./firefox` |
+| 推进方式 | worker 自行完成整条执行链 | worker 每完成一个阶段便交回结果 |
+| 决策主体 | 当前模型自行规划 | 人类或独立强模型 director |
+| 交互频率 | 仅在登录、验证码、业务选择或完成时停下 | 在入口确认、轨迹分析、上下文重建和实现验证等节点停下 |
+| 推荐场景 | 目标明确、希望无人值守 | 保护复杂、需要审阅过程或控制模型成本 |
 
-> ⚠️ **macOS 首次打开提示「"Firefox Reverse" 已损坏，无法打开」？** 这**不是真的损坏** —— 本浏览器是自签名应用、未做 Apple 付费公证（$99/年），从浏览器下载后会被系统打上「隔离」标记，Apple Silicon 上就报这个。打开「终端」执行一行去掉隔离即可正常打开：
-> ```bash
-> xattr -dr com.apple.quarantine "/Applications/Firefox Reverse.app"
-> ```
-> （路径换成你的实际安装位置；或：系统设置 → 隐私与安全性 → 拉到底点「仍要打开」。）
+在双模型方案中，便宜且稳定的 worker 承担页面操作、网络读取、代码搜索和脚本执行；能力更强的 director 只消费阶段摘要，负责判断路线、发现偏航并下达下一阶段目标。这样可以把高频工具调用留给低成本模型，同时保留强模型在关键决策上的优势。
 
-**② 打开 AI 侧边栏**
-启动浏览器 → 点击浏览器**右上角的 Firefox‑Reverse 星光图标**，打开 Agent 面板。若图标暂时不可见，先点地址栏左侧的侧栏按钮展开侧栏。
+配套 MCP 项目使用同一品牌与仓库地址：[browser-agent-mcp](https://github.com/zhang-pre/browser-agent-mcp)。接入后，director 可以检查运行状态、创建工作目录、选择 AI 辅助模式、启动会话、读取阶段结果并继续派发方向。
 
-**③ 配置模型账号**（配置一次，后续直接切换）
-点面板右上角 ⚙️ 设置 → 新建或选择一个命名配置，再填写供应商、API Key 和模型：
-- 支持 **DeepSeek**、**智谱 GLM**、**Kimi（Moonshot）**、**MiniMax**、**通义千问（Qwen）**、**Claude**、**OpenAI**，或任何 **OpenAI / Anthropic 协议兼容**的自定义端点（填 baseUrl + token + 模型名即可）。
-- 同一个渠道可以保存多个账号，例如“GPT 工作账号”“GPT 个人账号”，选择后从下一轮对话开始生效。
+长工具循环中的 worker 建议选择标准或快速档，例如 deepseek-v4-flash。推理档在连续工具调用场景中可能退化为只输出计划而不继续执行，因而更适合担任 director，而不是承担高频操作。
 
-> 💡 **模型选型建议**：简单 / 小站点用便宜模型（如 DeepSeek）即可上手；遇到复杂 / 大站点，弱模型在长链路里容易走弯路——这类目标建议用「自定义模型」端点接入 **Opus 4.8 或最新旗舰模型**，逆向推进更稳、少绕路。
-
-**④ 新建会话 → 选模式**
-点「新对话」，会弹出选择卡：
-- **⚡ 全自动** —— 给它目标接口/参数，它一条龙自己搞定（适合放着跑）；
-- **🧭 AI辅助** —— 它先出方案、每做完一个阶段就停下、给你方向选项，你来拍板、逐步推进（适合边看边学、复杂目标）。
-
-**⑤ 把目标告诉它**
-按下面这个格式把任务说清楚（信息越具体，AI 越少走弯路）：
-
-```
-【站点URL】https://example.com/list          # 能看到目标请求的页面
-【接口URL】GET https://example.com/api/v1/list?page=1   # 你最终想复现的请求
-【目标参数】请求头里的 X-Sign（签名）。若还有其他动态参数（时间戳 / 设备指纹 / token 等）一并列出
-【输出目标】① 黑盒可用版：用 Node.js 还原参数生成算法，脱离浏览器独立把接口请求成功
-　　　　　　② 白盒纯算版：进一步把它还原成不依赖原始混淆代码的纯 JS 实现（可选）
-```
-
-然后看它自己抓包、定位、补环境、实打验证。产物（脚本、还原代码、笔记）都会落到你为这个会话指定的**工作目录**里。
-
-<details>
-<summary><b>新手名词速查（点开看）</b></summary>
-
-- **签名 / 加密参数**：请求里一段算出来的字符串（如 `sign` `token` `X-Bogus`），服务端用它校验请求是否合法。
-- **补环境**：签名算法常依赖浏览器特有的东西（`navigator`、DOM、`crypto` 等）。在 Node 里把这些「假装」提供出来，让算法能跑，就叫补环境。
-- **JSVMP**：把 JS 编译成自定义「字节码 + 解释器」，看不到原始逻辑、极难读，是常见的强保护。
-- **WASM**：把算法编译成二进制模块，浏览器直接执行，源码不可见。
-- **白盒纯算**：彻底搞懂算法、用普通代码重写，最终**不再需要原始的 JSVMP/WASM 二进制**。
-- **工作目录**：你为一个会话指定的本地文件夹，Agent 的抓取脚本 / trace / 还原代码 / 进度笔记都存这里。
-
-</details>
-
-### 🪪 使用指纹环境（可选）
-
-1. 打开 Agent 侧边栏，点击醒目的**环境管理**入口。
-2. 点击**一键新建环境**，或把外部浏览器采集到的 JSON 粘贴导入；已建环境可继续重命名和编辑指纹配置。
-3. 选择环境后打开。Firefox-Reverse 会为它分配独立 profile、独立进程和可用的 Marionette 端口；再次打开同一环境会继续使用原 profile 中的 Cookie、历史记录、收藏与站点存储。
-4. 修改已运行环境的指纹后，先关闭该环境再重新打开。修改**当前主进程**指纹后，完整退出并重新启动 Firefox-Reverse。
-
-环境数据默认保存在 `~/.firefox-reverse/environments`，其中 `manifest.json` 记录环境索引，每个环境目录保存 `env.json`、`fingerprint.json`、`proxy.json`、`profile/`、`traces/`、`control/`、`captures/` 和 `logs/`。删除环境会同时删除其独立 profile，请先确认不再需要其中的登录态和站点数据。
+Windows 上若外部 AI 只显示 open_url，通常说明 MCP 尚未完成初始化。正常顶层入口应包含 frx_status、agent_tools 和 agent_call_tool；具体浏览器工具通过 agent_tools 枚举，再由 agent_call_tool 调度。
 
 ---
 
-## ✨ 核心亮点
+## 两阶段交付路径
 
-- **🧠 内置自主 Agent** —— 不是聊天框，是能连续调用 68 个工具、自己跑完「抓包→定位→验证→补环境→实打」全流程的逆向智能体。
-- **🪪 指纹环境隔离** —— 一个环境一个 profile + 独立进程，支持环境 CRUD、指纹生成/导入、主进程指纹与 MCP 指定环境启动。
-- **🔬 引擎层观测工具** —— 签名器入参、JSVMP 逐指令、WASM import 边界、浏览器真值 vs Node 复刻的分支差分深入 C++ 引擎，减少页面内 hook 和反调试对分析过程的干扰。
-- **🎛 两种工作模式** —— 全自动一条龙 / AI辅助逐阶段（你领航），按会话持久化、随时切换。
-- **🌐 站点无关** —— 面向**通用** JS / JSVMP / WASM / 签名逆向，不为任何特定网站定制；案例只是测试样例。
-- **🔌 任意大模型** —— DeepSeek / 智谱GLM / Kimi / MiniMax / 通义千问 / Claude / OpenAI 及任意 OpenAI/Anthropic 协议兼容端点，Key 保存在本地并直连所选服务。
-- **🗂 会话与配置迁移** —— 单会话 JSON 导入/导出，模型账号按命名配置保存和切换；导出的会话文件不包含模型 API Key。
-- **🧰 通用 Skills** —— 从 `~/.firefox-reverse/skills`、工作区 `.agents/skills` 和 `.firefox-reverse/skills` 发现 `SKILL.md`，按任务需要加载正文和 references。
-- **🧩 Firefox 扩展管理** —— Agent 可搜索 AMO、查看安装状态、管理用户扩展生命周期并打开配置页；安装只接受 AMO 记录且继续经过 Firefox 哈希、兼容性、阻止列表与签名校验。
-- **💾 跨会话记忆** —— 确认过的事实 / 踩过的坑沉淀进内置 SQLite，下次不再兜圈。
-- **🧩 常驻引擎** —— 对话引擎跑在父进程系统模块，切换标签页或收起侧边栏不会中断，多窗口工作目录互相隔离。
+分析过程按“先建立可验证结果，再逐步减少依赖”的顺序推进：
+
+1. **可运行复刻**：在 Node.js 中补齐必要上下文，继续加载原始 JSVMP 或 WASM 载荷；以本地生成参数能够通过真实服务端校验为验收标准。
+2. **独立算法实现**：从原载荷中提取核心计算过程，改写为普通代码，使最终实现不再依赖原始虚拟机或二进制模块。
+
+JSVMP 路线提供指令记录、派发器拆分、字节解码和离线反汇编；WASM 路线提供 import 边界探测、WAT 反汇编以及执行分支诊断。两条路线都可以先交付可用版本，再根据需要继续推进白盒化。
 
 ---
 
-## 🤖 两种工作模式
+## 68 项内置工具
 
-首次新建会话时选择，整条会话沿用（顶部模式标可随时切换）：
+工具由 <code>Tools.sys.mjs</code> 统一声明，下面的数量与当前注册表一致。
 
-| | ⚡ 全自动 | 🧭 AI辅助 |
+| 分类 | 工具接口 | 用途 |
 |---|---|---|
-| **节奏** | 给目标 → 一条龙跑到底 | 先出方案 → 逐阶段停下 → 你选方向 |
-| **打扰** | 中途不打扰，只在真需要你（登录态/验证码/纯业务决策）或完成时停 | 每做完一个阶段（入口定位 / 字节trace / DOM-API分析 / 构造实现）就停下汇报、给 2–3 个方向选项 |
-| **适合** | 放着跑、目标清晰、信任模型 | 复杂目标、想边看边学、想自己把控方向 |
-| **价值** | 省心 | 弱模型 + 人类领航 = 少走死路，复杂案例更稳 |
-
-> **🧭 AI辅助模式的「领航」可以是人，也可以是另一个强模型 —— 两种玩法：**
->
-> - **① 人工领航** —— 你读它每个阶段的结论、给方向修正，手把手把它从弯路里带出来。
-> - **② MCP 自动领航（成本拆分）** —— 让一个**强模型 director**（Claude / GPT 等最新旗舰）通过 **MCP** 自动「**指挥**」浏览器里这个内置逆向 Agent：浏览器 Agent 由一个**便宜的 worker 模型**（如 DeepSeek / 通义千问 / GLM）在 **AI辅助模式**下实操、**磨所有工具活**；**director 只读阶段结论、做方向修正**，不亲自跑工具。贵模型的判断力 + 便宜模型不知疲倦地磨工具，按 token 成本拆分（贵模型每轮只花一点点，便宜模型付掉所有 grinding）。
->   配套 MCP 仓库 → **[frx-director-mcp](https://github.com/WhiteNightShadow/frx-director-mcp)**（**开箱即用**：接好 MCP 后，把它 README 里的「🟢 一键贴给你的 AI」那**一整段复制给你的 director**，它会自己自检环境、缺啥用一句话引导你补齐、然后自动建目录 / 选 AI辅助 / 新建会话 / 下任务 / 读结论 / 回怼方向、循环到出结果——你只需在它问的时候给**目标站**）。
->
->   💡 **worker 模型选型（重要）**：MCP 这种长工具循环里，worker 务必用**标准 / 快速档**，推荐 **`deepseek-v4-flash`** —— 实测零漂移、约 2–3 分钟/阶段、配合最顺。**切勿用推理档**（如 `deepseek-v4-pro`）：推理档在长循环里易退化成「只吐纯文本计划、不再调用工具」而中断，是 worker 的首要失败模式。可在浏览器 Agent ⚙️ 设置里把 worker 设为该档，或让 director 在 `agent_start({ model: "deepseek-v4-flash" })` 里临时指定（同一个 Key、无需改配置）。
->
->   **Windows 工具接入自检**：若外部 AI 的函数列表里只有 `open_url`，这是宿主自己的工具，表示 `frx-director-mcp` 没有完成初始化；升级到 MCP `v0.3.6+`。正常顶层工具应包含 `frx_status`、`agent_tools`、`agent_call_tool`；`notes_add`、`net_get`、`page_click`、`run_node`、`fs_*` 等浏览器内核工具通过 `agent_tools` 查询并由 `agent_call_tool` 直调。
-
----
-
-## 🎯 二阶段：黑盒可用 → 白盒纯算
-
-Agent 的推进遵循一条务实路线——**先拿到能用的，再追求吃透的**：
-
-1. **黑盒可用版**：Node 补环境**跑原始 WASM/JSVMP**，以「**本地生成的签名实打目标接口、服务端返回有效数据**」为准。✅ JSVMP / WASM 两种载体都成熟。
-2. **白盒纯算**：把内部算法**抠出来、纯代码重写**，彻底不依赖原始二进制。✅ JSVMP 工具链齐全且实战验证；WASM 提供反汇编（WAT）+ 引擎级分支诊断，可深入分析。
+| 页面交互（9） | <code>page_navigate page_click page_scroll page_type page_eval page_screenshot page_elements page_info page_automation_scan</code> | 页面导航、输入点击、脚本执行、截图、元素读取及自动化特征检查 |
+| 网络与入口（5） | <code>net_capture net_list net_get hook_inject find_param_entry</code> | 记录请求、查看详情与调用来源、在 document-start 阶段注入探针并定位动态字段 |
+| 源码处理（4） | <code>code_search scripts_list scripts_save scripts_capture_all</code> | 检索语料或工作目录，枚举、采集并保存页面脚本 |
+| 签名与闭包（2） | <code>signer_trace closure_read</code> | 从调试通道获取函数实参与闭包中的运行时值 |
+| WebAPI 观测（2） | <code>webapi_trace webapi_query</code> | 记录并检索 Navigator、DOM、Canvas 等接口的读取行为 |
+| JSVMP 分析（5） | <code>jsvmp_trace jsvmp_query jsvmp_status jsvmp_split_dispatcher jsvmp_disassemble</code> | 采集指令序列、查询状态、拆解派发器并执行离线反汇编 |
+| 密码特征（1） | <code>crypto_scan</code> | 搜索 RC4、XXTEA、MD5/SHA、AES、SM4 和自定义 Base64 等常量模式 |
+| WASM 分析（2） | <code>wasm_probe wasm_disasm</code> | 检查 import 调用边界并将模块转换为 WAT |
+| 分支对照（1） | <code>whitebox_diff</code> | 比较浏览器执行与本地复刻的覆盖范围和控制流差异 |
+| JavaScript 轨迹（1） | <code>js_trace</code> | 结合 AST 插桩与 Node.js 执行记录普通函数调用 |
+| 执行与文件（8） | <code>run_node run_python npm_install fs_read fs_write fs_list fs_copy fs_mkdir</code> | 在受控工作目录运行程序、安装依赖并维护产物 |
+| Cookie（1） | <code>cookies</code> | 通过原生 Cookie 管理器读写数据，包括 httpOnly 项 |
+| Firefox 扩展（2） | <code>addons_query addons_manage</code> | 查询 AMO、查看安装状态并执行安装、启停、卸载或打开设置页 |
+| Skills 与记忆（7） | <code>skill_list skill_get skill_read_resource notes_add notes_get remember recall</code> | 发现和读取 Skill、记录阶段信息并维护跨会话知识 |
+| 指纹环境（18） | <code>env_current env_current_process env_read_current_process_config env_write_current_process_config env_reset_current_process_default env_list env_status env_create env_update env_open env_close env_read_config env_write_config env_generate_fingerprint env_capture_fingerprint env_import_fingerprint env_import env_delete</code> | 查询主进程与当前环境，维护生命周期，并读写、生成、采集或导入指纹配置 |
 
 ---
 
-## 🧰 工具大全（68）
+## 源码构建
 
-当前版本由 `Tools.sys.mjs` 精确注册 **68 个工具**，下表与代码声明一一对应：
+仓库保存的是应用到 Firefox 源码树上的增量内容，主要代码位于 <code>additions/</code>。首次构建需要先准备锁定版本的 Firefox 源码：
 
-| 类别 | 工具 | 说明 |
-|---|---|---|
-| **页面自动化（9）** | `page_navigate` `page_click` `page_scroll` `page_type` `page_eval` `page_screenshot` `page_elements` `page_info` `page_automation_scan` | 导航、交互、执行 JS、截图、读取元素与自动化特征自检 |
-| **网络 / 入口定位（5）** | `net_capture` `net_list` `net_get` `hook_inject` `find_param_entry` | 抓包、读取请求详情与发起者调用栈、document-start 注入 hook、定位动态参数入口 |
-| **代码 / 脚本（4）** | `code_search` `scripts_list` `scripts_save` `scripts_capture_all` | 搜索页面语料和工作目录、枚举与落盘脚本 |
-| **签名器 / 闭包追踪（2）** | `signer_trace` `closure_read` | 从引擎调试通道读取签名函数真实入参与闭包变量真值 |
-| **WebAPI trace（2）** | `webapi_trace` `webapi_query` | 记录并查询页面读取过的 Navigator、DOM、Canvas 等 WebAPI |
-| **JSVMP 白盒（5）** | `jsvmp_trace` `jsvmp_query` `jsvmp_status` `jsvmp_split_dispatcher` `jsvmp_disassemble` | 逐指令 trace、查询状态、拆分派发器、解码字节并反汇编 |
-| **密码学识别（1）** | `crypto_scan` | 识别 RC4、XXTEA、MD5/SHA、AES、SM4 与自定义 Base64 等常量特征 |
-| **WASM（2）** | `wasm_probe` `wasm_disasm` | 观测 WASM import 边界并把二进制反汇编为 WAT |
-| **白盒诊断（1）** | `whitebox_diff` | 对比浏览器真值与 Node 复刻的覆盖率、分支路径差异 |
-| **通用 JS trace（1）** | `js_trace` | AST 插桩配合 Node 执行，逐函数追踪普通 JavaScript |
-| **执行 / 文件（8）** | `run_node` `run_python` `npm_install` `fs_read` `fs_write` `fs_list` `fs_copy` `fs_mkdir` | 在工作目录执行脚本、安装依赖与管理文件 |
-| **Cookie 管理（1）** | `cookies` | 通过引擎 Cookie 管理器列出、设置和删除 Cookie，包括 httpOnly Cookie |
-| **Firefox 扩展（2）** | `addons_query` `addons_manage` | 搜索 AMO、列出已安装扩展，并安全执行安装、启停、卸载和打开配置页 |
-| **Skills / 记忆（7）** | `skill_list` `skill_get` `skill_read_resource` `notes_add` `notes_get` `remember` `recall` | 发现并读取本机/工作区 Skill，兼容内置逆向方法论，记录会话笔记并维护跨会话记忆 |
-| **指纹环境（18）** | `env_current` `env_current_process` `env_read_current_process_config` `env_write_current_process_config` `env_reset_current_process_default` `env_list` `env_status` `env_create` `env_update` `env_open` `env_close` `env_read_config` `env_write_config` `env_generate_fingerprint` `env_capture_fingerprint` `env_import_fingerprint` `env_import` `env_delete` | 查询当前环境和主进程，管理环境生命周期，读写/生成/采集/导入指纹配置 |
-
----
-
-## 🖥 平台与下载
-
-| 平台 | 架构 | 状态 |
-|---|---|---|
-| **Windows** | x86_64 | ✅ 提供安装包（持续完善中，欢迎反馈） |
-| **macOS** | Apple Silicon (arm64) | ✅ 提供安装包 |
-| **macOS** | Intel (x86_64) | ✅ 提供安装包 |
-| **Linux** | x86_64 | ✅ 提供安装包 |
-| **Linux** | ARM64 (AArch64) | ✅ 提供安装包 |
-
-安装包在 **Linux 构建机上交叉编译**（macOS arm64 / macOS x86_64 / Windows64 / Linux x86_64 / Linux ARM64）后发布到 [Releases](../../releases)。macOS 两种架构使用独立对象目录构建，并在发布前校验 DMG 内主程序架构与签名；Linux 包会校验 ELF 架构和内置 Agent / 指纹环境模块。
-
----
-
-## 🏗 从源码构建
-
-> 只想用的话直接去 [Releases](../../releases) 下载即可，无需自己编译。
-
-本仓库是 **Firefox 的「补丁集」**（`additions/`），不含 Firefox 源码本身。构建流程：
-
-```bash
-# 1. 取得锁定的 Firefox 153.0a1 源码到 upstream/（首次）
+~~~bash
 bash scripts/bootstrap.sh
-
-# 2. 应用本仓库的 additions（agent-sidebar + 引擎层 C++ 补丁）
 bash scripts/apply-patches.sh
 
-# 3. 编译 + 打包
-cd upstream && ./mach build && ./mach package
-```
+cd upstream
+./mach build
+./mach package
+~~~
 
-修改 `additions/` 后进行日常增量开发时，不要重新应用整套 patch；同步新增文件和
-`moz.build` 清单后执行 faster 构建即可：
+日常开发不需要反复应用完整补丁。修改 <code>additions/</code> 后同步增量文件，再执行 faster 构建：
 
-```bash
+~~~bash
 bash scripts/sync-additions.sh
-cd upstream && ./mach build faster
-```
 
-- 侧边栏与父进程后端：`additions/browser/components/agent-sidebar/`；React UI、Agent 引擎、68 个工具声明、`AddonBackend.sys.mjs` 和 `EnvironmentBackend.sys.mjs` 均在此维护，前端通过 `npm run build` 生成 bundle。
-- 指纹配置层：`additions/dom/base/FrxFingerprintConfig.*`、`NavigatorUAData.*` 及 `scripts/apply-fingerprint-config.py` 写入的 Gecko / Necko 接入点。
-- 引擎观测层：`additions/js/...` 的 SpiderMonkey trace 与 `additions/dom/bindings/...` 的 WebAPI trace。
-- 环境数据不写进仓库或构建目录，运行时默认落在 `~/.firefox-reverse/environments`。
-- 自动化构建脚本见 `.github/workflows/release.yml`。
+cd upstream
+./mach build faster
+~~~
 
----
+主要维护区域：
 
-## 🏛 架构
+- <code>additions/browser/components/agent-sidebar/</code>：React 侧边栏、Runtime、LLM 适配、工具注册和 Firefox 后端。
+- <code>additions/dom/base/</code>：指纹配置与 Navigator 相关接入。
+- <code>additions/dom/bindings/</code>：WebAPI 边界观测。
+- <code>additions/js/</code>：SpiderMonkey 层的 JSVMP 与执行轨迹能力。
+- <code>.github/workflows/release.yml</code>：自动化构建和发布流程。
 
-```
-┌─────────────────────────── Firefox‑Reverse ───────────────────────────┐
-│                                                                          │
-│  侧边栏 React UI (omni.ja)                                               │
-│  ├ Agent 对话 / 模式选择 / 工作目录                                      │
-│  ├ 指纹环境列表 / 配置编辑 / 主进程指纹                                  │
-│  └ 订阅父进程快照，面板重载不丢 Agent 会话                               │
-│                                                                          │
-│  常驻引擎（父进程系统模块, .sys.mjs）                                     │
-│  ├ AgentSession / AgentLoop   会话、工具循环、上下文压缩                  │
-│  ├ ToolRouter / Tools         68 个工具的声明与路由                       │
-│  ├ AddonBackend               AMO 搜索、扩展生命周期与配置页              │
-│  ├ EnvironmentBackend         环境 CRUD、配置、进程与端口状态             │
-│  └ ConfigStore / Memory       本地配置与 SQLite 跨会话记忆                │
-│                                                                          │
-│  环境运行时 (~/.firefox-reverse/environments)                            │
-│  ├ manifest.json + 每环境 env/fingerprint/proxy/control/traces/logs      │
-│  └ 每环境独立 profile + Firefox 进程 + Marionette 端口                    │
-│                                                                          │
-│  Gecko / SpiderMonkey C++                                                │
-│  ├ FrxFingerprintConfig       启动读取，覆盖 Navigator/Screen/Intl/HTTP   │
-│  │                            UA-CH/WebGL 等已接入字段                     │
-│  ├ JSVMP 逐指令 trace         SpiderMonkey 解释器观测                     │
-│  ├ WebAPI trace               DOM binding 边界观测                        │
-│  └ whitebox_diff              覆盖率与分支差分                            │
-└────────────────────────────────────────────────────────────────────────┘
-
-输出一：隔离、可复用、可由 UI / Agent / MCP 管理的指纹浏览器环境
-输出二：经过实打验证、可脱离浏览器运行的 Node.js / Python 算法
-```
+运行期的环境资料位于用户目录下的专用数据区域，不写入仓库或 Firefox 构建目录。
 
 ---
 
-## ❓ FAQ
+## 模块边界
 
-- **要不要懂编译 / 配环境？** 不用。下载 Releases 安装包即可，配个大模型 Key 就能用。
-- **支持哪些大模型？** DeepSeek / 智谱GLM / Kimi（Moonshot）/ MiniMax / 通义千问（Qwen）/ Claude / OpenAI，以及任何 OpenAI/Anthropic 协议兼容的自定义端点。Key 只存本地。
-- **我的 Key / 数据会上传吗？** Key 保存在本地并由 Firefox-Reverse 直连你选择的模型服务，不经过项目作者的中转服务器。Agent 工作时会按任务需要把提示词、页面片段和工具结果发送给该模型服务；敏感任务请使用你信任或自托管的兼容端点。
-- **环境之间真的隔离吗？** 每个环境拥有独立 profile、进程和 Marionette 端口，Cookie、历史记录、收藏、LocalStorage 与缓存分别持久化。它们仍运行在同一台操作系统上，不等同于虚拟机级隔离。
-- **为什么保存指纹后页面没有立刻变化？** C++ 配置按进程启动读取。普通环境需要关闭后重新打开；当前主进程需要完整退出并重新启动 Firefox-Reverse。
-- **还能新建 Chrome-like 环境吗？** 不再支持。新建、重新生成和采集导入都会收敛为与当前内核一致的 Firefox 身份；已经存在的历史环境文件保持原样，不会被自动改写。
-- **可以由外部 AI 管理环境吗？** 可以。内置 Agent 具备 18 个 `env_*` 工具；配套 `frx-director-mcp` 提供 `frx_env_*` 工具用于列表、新建、打开、关闭、删除与导入，并可用 `FRX_ENV_ID` 绑定指定环境启动。
-- **全自动和 AI辅助选哪个？** 目标清晰、信任模型 → 全自动；复杂 / 想把控方向 / 想学 → AI辅助。
-- **能保证破解任何站点吗？** 不能。强保护（深度 JSVMP / 自带密钥的 WASM）依然很难；本工具是把分析效率拉满，不是银弹。
+~~~text
+┌──────────────────────────── browser-agent-mcp ────────────────────────────┐
+│                                                                           │
+│  React 侧边栏                                                             │
+│  ├─ 会话、模式、工作目录与流式状态                                        │
+│  ├─ 指纹环境列表、配置编辑与进程状态                                      │
+│  └─ Provider、模型与显示偏好                                              │
+│                                                                           │
+│  Firefox Host                                                             │
+│  ├─ AgentSession：进程级入口                                              │
+│  └─ FirefoxAgentRuntimeHost：特权能力、生命周期与上下文适配                │
+│                                                                           │
+│  Agent Runtime                                                            │
+│  ├─ AgentRuntimeCore：状态、订阅、确认、取消与线程认领                    │
+│  ├─ AgentTurnOrchestrator：单轮编排、持久化、上下文与自动续跑             │
+│  └─ AgentLoop：模型调用与工具执行闭环                                     │
+│                                                                           │
+│  LLM Stack                                                                │
+│  ├─ LlmClient / LlmProtocol：稳定入口与协议转换                           │
+│  ├─ LlmStreamParser：SSE、文本、推理与工具参数增量                        │
+│  └─ LlmRequestExecutor / LlmTransport：请求、超时、重试与宿主网络         │
+│                                                                           │
+│  ToolRouter + Backends                                                    │
+│  ├─ 页面、网络、源码、文件、Cookie、扩展、Skills 与记忆                   │
+│  └─ 环境管理、WebAPI、JSVMP、WASM 与白盒诊断                             │
+│                                                                           │
+│  Gecko / SpiderMonkey                                                     │
+│  ├─ FrxFingerprintConfig：进程启动阶段加载指纹配置                        │
+│  ├─ JSVMP 与通用 JavaScript 执行轨迹                                     │
+│  ├─ DOM/WebAPI binding 边界记录                                           │
+│  └─ 浏览器真值与本地实现的控制流对照                                      │
+└───────────────────────────────────────────────────────────────────────────┘
+~~~
 
----
-
-## ⚖️ 法律与授权声明
-
-本项目是面向**安全研究、接口对接、授权测试**的逆向分析工具。使用者须对自己的行为负责：
-
-- **仅在你拥有合法授权的目标上使用**（你自己的平台、获得授权的测试对象、CTF / 教学等）。
-- **不得**用于未授权访问、绕过他人系统的安全机制、大规模抓取或任何违反目标方服务条款 / 当地法律的行为。
-- 作者与贡献者不对任何滥用行为负责。下载即表示你已理解并同意上述条款。
-
----
-
-## 📝 版本更新记录
-
-### v0.24.1（2026-09-04）
-- **Ledger SQL 防御性加固**：确认外部 PR 报告不是当前可利用的 SQL 注入；`workspace/site` 列名原本只来自内部固定枚举，所有业务值也已参数绑定。本版进一步改为完整固定 SQL allowlist，未知作用域列直接 fail-closed，消除静态扫描歧义。
-- **去重删除保持原子性**：ID 列表仍通过单条 `DELETE ... IN (?,...)` 数组绑定执行；SQL 文本只按内部结果数量生成占位符，不拼接任何 ID 值，保持原有单语句语义和性能。
-- **回归门禁**：新增作用域 SQL、恶意值、多 ID 批量删除和非法数量专项自测，并纳入 Agent 全量自测。
-- **兼容性**：不改变账本数据库结构、记忆内容、去重规则、120/60 容量限制、Agent 工具接口或浏览器指纹能力。
-
-### v0.24.0-beta.2（2026-09-02）
-- **多端构建一致性修复**：补回干净 Firefox 基线中 Agent 侧栏的 `makeSidebar` 注册块，并增加构建门禁，避免长期增量源码树可见、全新源码树却缺少侧栏入口的差异。
-- **发布溯源一致性**：强制刷新各对象目录的 `buildid.h` 与 `source-repo.h`，避免增量构建出现新 BuildID 搭配旧 SourceStamp；五端产物必须同时匹配本次提交和统一 BuildID。
-- **兼容性**：不改变扩展工具、ContextProjection、历史会话、模型配置、指纹环境或 C++ 行为；beta.1 的功能与文件协议保持兼容。
-- **多端复验**：使用同一锁定基线重新构建并验证 macOS ARM64/Intel、Windows x86_64、Linux x86_64/ARM64 产物。
-
-### v0.24.0-beta.1（2026-09-02）
-- **Firefox 扩展 Agent 能力**：新增 `addons_query` / `addons_manage`，支持 AMO 搜索、列出已安装扩展、查看状态、安装、启用、禁用、卸载与打开配置页面；打开后继续复用 `page_info` / `page_elements` / `page_click` / `page_type` 做配置自动化。
-- **最小权限边界**：安装只接受 AMO slug/GUID/数字 id，强制透传 AMO SHA-256 并要求 Firefox 返回有效签名状态；任意 XPI URL、系统/应用内置扩展修改和任意扩展内部业务 API 不开放。扩展管理沿用工具确认，安装和卸载还必须显式传 `confirm:true`。
-- **Token 与缓存优化 beta**：增加多 Provider Usage 统计、稳定提示前缀和 OpenAI/Anthropic 原生缓存；长会话使用持久化 ContextProjection，大工具输出折叠到 `.frx-context/tool-results/`，完整 UI 历史不删除。设置中可随时切回“旧完整历史”。
-- **兼容性**：原 66 个工具名称和参数不变，仅追加 2 个扩展工具；会话导入导出、环境管理、Agent/MCP 工具循环及 C++ 指纹行为保持原协议。
-- **可复现构建**：修复全新源码树遗漏 `browser/components/agent-sidebar` 父级注册的问题；Release workflow 固定 Firefox `cebc55aab4d` 基线并停止吞掉补丁失败，避免不同构建机误用更新后的 Mozilla main。
-
-### v0.23.1（2026-08-20）
-- **Windows MCP 工具接入兼容**：配套 `frx-director-mcp v0.3.6` 将 stdio 注册提前到环境解析、端口分配和 Firefox 冷启动之前，修复外部 AI/CLI 超时后只剩宿主 `open_url` 的问题。
-- **66 工具目录一致性**：MCP 改为读取浏览器真实 backend 注册表，`agent_tools` 返回完整 66/66，并通过 `missingDeclared` 暴露打包或后端缺失；顶层 MCP 工具与浏览器内核工具的调用边界已在文档中明确。
-- **可核验发布标记**：安装包内置 `extensions.firefox-reverse.version=0.23.1`，五端统一使用新 BuildID；新增 `force-build-id-relink.sh`，避免增量构建只更新 ini、运行时 XUL 仍携带旧 BuildID。
-- **兼容性说明**：Firefox v0.23.0 浏览器包本身未丢工具，问题来自配套 MCP 的启动顺序与旧目录 stub；本版不改变指纹、profile、Agent 执行或 C++ 行为，仅同步版本、排障说明并重新验证多端安装包。
-
-### v0.23.0（2026-08-14）
-- **会话迁移**：历史抽屉支持单会话 `.frx-chat.json` 导入/导出；导入会生成新的静止会话，不携带模型配置中的 API Key、工作目录、环境绑定和运行状态，也不会自动重放历史任务（对话正文及其中用户自行粘贴的内容会保留）。
-- **多账号模型配置**：模型设置支持命名配置的新建、复制、删除和即时切换，同一个 GPT/DeepSeek/Anthropic 渠道可以分别保存多组账号、端点、模型和思考等级；旧版当前配置自动迁移并继续兼容。
-- **手动取消边界**：停止任务后持久记录 `cancelled` 状态，下一条消息默认作为新任务，不再自动续做已取消事项；用户明确说“继续上一项任务”时仍可恢复。
-- **通用 Skills**：新增 `skill_list`、按名 `skill_get` 和 `skill_read_resource`，发现用户目录及工作区 `.agents/skills` / `.firefox-reverse/skills`；无参数 `skill_get` 保持原内置逆向方法论行为。
-- **多端发布**：同步提供 macOS Apple Silicon / Intel、Windows x86_64、Linux x86_64 / ARM64 安装包与统一 SHA256 校验文件。
-
-### v0.22.4（2026-07-29）
-- **新环境回归 Firefox 指纹**：新建、重新生成和外部采集导入只产出与当前 Gecko 版本及真实操作系统一致的 Firefox 身份，不再新建 Chrome-like 环境。
-- **中国大陆中文默认值**：新环境默认 `zh-CN`、`Asia/Shanghai` 和简体中文语言组，环境详情仍可自定义语言、地区与时区；浏览器界面和右键菜单随安装包提供简体中文资源。
-- **原生菜单坐标修复**：指纹中的 `screen.*` 与 `devicePixelRatio` 只覆盖网页内容，不再污染浏览器 chrome/XUL 的真实显示器坐标；修复多屏和缩放场景下右键菜单远离鼠标的问题。
-- **历史环境保持兼容**：已有环境不自动迁移、不覆盖原 `fingerprint.json`，原有 profile、Cookie、收藏、历史记录和自动化链路继续沿用。
-- **环境接口同步**：内置 Agent 与 `frx-director-mcp` 的新建环境参数统一支持语言、语言组、locale 和 timezone，并补充 Firefox-only 回归测试。
-
-### v0.22.3（2026-07-15）
-- **自定义模型思考等级**：自定义 OpenAI 兼容端点新增 `自动 / none / minimal / low / medium / high / xhigh / max` 选项；“自动”保持原请求行为，显式等级才发送 `reasoning_effort`，Anthropic 协议不会误传该字段。
-- **品牌显示补齐**：补齐 Firefox-Reverse 新标签页、隐私窗口和 Windows 快捷方式所需的品牌图标与 wordmark，减少回退显示 Nightly 名称或原始图标的情况。
-- **README 操作指引更新**：重新截取当前构建的 Agent 与指纹环境管理界面，增加侧栏按钮、星光入口、一键新建、环境状态和指纹导入的编号标记。
-- **四端安装包**：同步发布 macOS ARM64、macOS Intel、Windows x86_64 和 Linux x86_64 构建及 SHA256 校验文件。
-- **Linux ARM64 补充包（2026-07-21）**：新增原生 AArch64 构建 `firefox-reverse-v0.22.3-linux-arm64.tar.xz`，并更新 Release 的 `SHA256SUMS`。
-
-### v0.22.2（2026-07-13）
-- **新增 Intel Mac Release**：增加 `x86_64-apple-darwin` 独立构建配置和 `macos-x86_64` DMG，支持 Intel Mac（macOS 10.15+）。
-- **macOS 架构防错**：发布流程分别构建 arm64 / x86_64，并在 DMG 校验时核对真实 Mach-O 架构；新增跨平台产物在 macOS 上 ad-hoc 重签与重打包脚本。
-- **环境启动卡顿修复**：打开指纹环境后等待 Marionette 端口真实就绪再显示“运行中”，正确通过 Marionette pref 分配端口，并持续消费子进程输出，避免 Windows 冷启动期间误判和管道阻塞。
-
-### v0.22.1（2026-07-13）
-- **Windows 环境状态修复**：`tasklist.exe` / `taskkill.exe` 改用绝对路径，浏览器已经打开后不再被环境管理误判为“已停止”。
-- **PID 三态探测**：进程状态区分 `alive`、`dead`、`unknown`，系统探测异常时保留原运行状态，不再破坏 runtime 数据。
-- **多环境端口避让**：分配 Marionette 端口前执行真实 loopback 绑定检查，同时优先使用当前后端进程句柄，减少重复查询和端口冲突导致的启动卡顿。
-- **Windows 回归测试**：新增系统命令解析、状态刷新、进程句柄优先和多环境端口分配测试，并纳入一键 Agent 工具自测。
-
-### v0.22.0（2026-07-07）
-- **指纹浏览器环境管理**：新增环境实体与独立 profile / 独立进程运行链路，支持环境列表、新建、重命名、打开、关闭、删除、导入指纹 JSON。
-- **侧边栏环境管理**：Agent 侧边栏新增明显的环境管理入口，可维护环境状态、编辑当前主进程指纹、保存后重启生效，并支持一键还原默认。
-- **C++ 指纹配置覆盖**：启动时读取环境或当前 profile 的 `fingerprint.json`，覆盖 Navigator、Screen、DPR、locale / timezone、`User-Agent` / `Accept-Language`、UA-CH 与 WebGL unmasked vendor / renderer 等已接入字段。
-- **Chrome-like 指纹生成与导入**：支持按 OS、版本、语言、分辨率、DPR、时区生成一致组合；支持外部浏览器控制台采集 JSON 后粘贴导入。
-- **MCP 环境联动**：配合 `frx-director-mcp` 通过 `FRX_ENV_ID` 启动指定环境，并保留无环境时的主进程 profile 指纹模式。
-- **macOS 包修复**：修复本地覆盖安装后的签名/启动问题，重新生成签名 DMG 与 SHA256 校验文件。
-
-### v0.19（2026-06-10）
-- **新增模型**：Kimi（Moonshot，`kimi-k2.6`）、MiniMax（`MiniMax-M3`）、通义千问（Qwen，`qwen3-max`）—— 连同原有 DeepSeek / 智谱 GLM / Claude / OpenAI，主流大模型基本覆盖。
-- **MCP 外部驱动可见性**：新增 `AgentSession.listRunning()` + 侧栏「空闲自动跟随 / 忙时横幅」——外部（如 MCP director）驱动的会话能在侧栏**自动切到、实时流式、并显示绑定的工作目录**（配套 [frx-director-mcp](https://github.com/WhiteNightShadow/frx-director-mcp) 成本拆分玩法，见「两种工作模式」）。
-- **「停止」即时生效（框架级修复）**：`run_node` / `run_python` 卡住时点停止会**立刻杀掉子进程**（之前要干等到超时才结束）；`run_node` 默认超时 **300s → 30s**（正常 JS 加载足够，hang 住能更快释放）。
-- **工具补齐（当时）**：加入密码学常量识别、引擎层闭包真值读取、document-start hook 和结构无关派发器探测，工具数由 40+ 扩展到 **44+**；派发器探测后来合并进 JSVMP 工具链，当前版本以「工具大全」中的 **68 个**为准。
-- **方法论 / 健壮性**：简单站「快车道」判型（先 hook 对比标准算法、不硬扣混淆）、`page_eval` 全权 + 大输出 `saveTo` 落盘、SSR 站识别、长任务护栏对强模型软化（硬限制转软提示、随上下文窗口缩放）。
-
-### v0.17 – v0.18（2026-06-08 起）
-- 三端（Windows / macOS / Linux）正式构建并发布到 Releases；上下文窗口按所选模型自动缩放（`modelBudget`，长逆向不再轻易截断）；持续打磨 skill 方法论、工具稳定性与长任务健壮性。
-
-### 更早（v0.12 – v0.16）
-- JSVMP 离线工具链（派发器拆分 / 字节反汇编）封成一等工具；通用 **WebAPI 指纹 tracer**（C++ 引擎层、页面无感）；**WASM** 边界探测 `wasm_probe` + 反汇编 `wasm_disasm`；通用 JS 逐函数 trace `js_trace`；签名器入参追踪 `signer_trace`；白盒分支差分 `whitebox_diff`；内置逆向方法论 `skill_get` + 跨会话 **SQLite 记忆** + 反绕圈护栏；对话引擎挪到父进程**常驻**（切窗 / 关侧栏不中断）。
-
----
-
-## 🔑 外部支持 · 模型 Key 申请
-
-Firefox‑Reverse Key 直连你选的模型，**Key 只存本地、不经第三方**。下面整理了各模型的 Key 申请入口，按需自取：
-
-| 模型 / 服务 | 说明 |
-|---|---|
-| [**DeepSeek**](https://platform.deepseek.com/usage) | 性价比高，Agent 默认推荐 |
-| [**智谱 GLM**](https://open.bigmodel.cn/) | |
-| [**Kimi（Moonshot）**](https://platform.moonshot.cn/) | |
-| [**MiniMax**](https://platform.minimaxi.com/) | |
-| [**通义千问（Qwen）**](https://bailian.console.aliyun.com/) | 阿里云百炼 |
-
-> **接入方式**：以上均为 Agent ⚙️ 设置里的**内置供应商**，选中、填 Key 即可用；其它 OpenAI / Anthropic 兼容端点选 **「自定义」**，填入 baseUrl + Key + 模型名即可。
-
----
-
-## 📮 反馈 / 联系
-
-使用中遇到问题、想反馈 bug、或交流逆向思路，欢迎加微信或进群反馈：
-
-> **微信号：`han8888v8888`**（加好友请备注「Firefox-Reverse」）
-
-也可以扫码加入 **AI爬盒** 微信群，交流 Firefox-Reverse、Agent、指纹环境和 JS 逆向实践：
-
-<img src="docs/wechat-group-20260713-v2.png" width="360" alt="AI爬盒微信交流群二维码">
-
----
-
-## License
-
-[MPL‑2.0](https://www.mozilla.org/MPL/2.0/) —— 与上游 Firefox 一致。本项目为 Firefox 的衍生作品，相关商标归 Mozilla 所有。
+最终交付通常包含两类结果：一套能够重复启动和管理的隔离浏览器环境，以及一份经过真实接口验证、可以脱离浏览器运行的 Node.js 或 Python 实现。
