@@ -38,6 +38,8 @@ SELFTESTS=(
   selftest-llm-architecture.mjs
   selftest-context-projection.mjs
   selftest-context-runtime.mjs
+  selftest-unified-context.mjs
+  selftest-thinking-context.mjs
   selftest-turn-context.mjs
   selftest-skills.mjs
   selftest-stream.mjs

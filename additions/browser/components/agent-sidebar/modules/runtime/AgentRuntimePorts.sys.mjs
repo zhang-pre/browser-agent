@@ -31,6 +31,10 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
  * @property {function(string, object): Promise<void>} setContextProjection
  * @property {function(string, object): Promise<void>} appendMessage
  * @property {function(string, object): Promise<void>} addThreadUsage
+ * @property {function(string): Promise<object>} getUnifiedContext
+ * @property {function(string, Array): Promise<object>} appendContextEvents
+ * @property {function(string, object, string, object): Promise<object>} commitUnifiedCompaction
+ * @property {function(string, object, string, object): Promise<object>} commitUnifiedRewrite
  */
 
 /**
@@ -59,7 +63,7 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
 /**
  * @typedef {object} AgentRuntimeBackendsPort
  * @property {{digest: Function, mergeHandoff: Function}} ledger
- * @property {{write: Function}} workspace
+ * @property {{write: Function, read?: Function}} workspace
  */
 
 /**
@@ -151,6 +155,7 @@ export function assertAgentBackendsPort(backends) {
     }),
     workspace: Object.freeze({
       write: bound(workspace, "write"),
+      read: workspace.read ? bound(workspace, "read") : null,
     }),
   });
 }
@@ -238,6 +243,10 @@ export function defineAgentRuntimePorts(input) {
     setContextProjection: bound(conversations, "setContextProjection"),
     appendMessage: bound(conversations, "appendMessage"),
     addThreadUsage: bound(conversations, "addThreadUsage"),
+    getUnifiedContext: conversations.getUnifiedContext ? bound(conversations, "getUnifiedContext") : null,
+    appendContextEvents: conversations.appendContextEvents ? bound(conversations, "appendContextEvents") : null,
+    commitUnifiedCompaction: conversations.commitUnifiedCompaction ? bound(conversations, "commitUnifiedCompaction") : null,
+    commitUnifiedRewrite: conversations.commitUnifiedRewrite ? bound(conversations, "commitUnifiedRewrite") : null,
   });
 
   return Object.freeze({

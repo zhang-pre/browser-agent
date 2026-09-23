@@ -1,3 +1,4 @@
+import { createUnifiedTurnContext } from "./UnifiedTurnContext.sys.mjs";
 /* TurnContext.sys.mjs — working context for one Agent turn.
  * Cross-turn persisted projections live in ContextProjection.sys.mjs.
  * This module owns no runtime, tools, UI, or storage; effects use callbacks.
@@ -123,7 +124,7 @@ function _msgSize(m) {
   if (m.content != null) {
     n += typeof m.content === "string" ? m.content.length : JSON.stringify(m.content).length;
   }
-  if (m.reasoning_content) {
+  if (m.reasoning_content !== undefined) {
     n += String(m.reasoning_content).length;
   }
   if (m.tool_calls) {
@@ -255,7 +256,17 @@ export async function createTurnContext({
   client, messages, systemPrompt, dynamicContext, getLedger,
   signal, onUsage, cacheKey = "", onCheckpoint, onEvent,
   budget = modelBudget(client.model || client.config?.model),
+  contextStrategy = "legacy", journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
+  toolSpecs = [], contextWindowTokens,
 }) {
+  if (contextStrategy === "projected") {
+    return createUnifiedTurnContext({
+      client, messages, journal, systemPrompt, dynamicContext, getLedger,
+      signal, onUsage, cacheKey, onCheckpoint, onEvent,
+      onAppend: onContextAppend, onCommit: onContextCommit, onRewrite: onContextRewrite, onValidateEvidence, onRefresh: onContextRefresh, onContextRefresh,
+      toolSpecs, contextWindowTokens,
+    });
+  }
   const { maxChars, compactAt } = budget;
   let lastCompactRound = 0;
   const emit = event => {
@@ -276,7 +287,7 @@ export async function createTurnContext({
     if (m.name) {
       o.name = m.name;
     }
-    if (m.reasoning_content) {
+    if (m.reasoning_content !== undefined) {
       o.reasoning_content = m.reasoning_content; // 思考型模型多轮需保留
     }
     return o;

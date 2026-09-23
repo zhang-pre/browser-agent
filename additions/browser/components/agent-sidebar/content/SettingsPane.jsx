@@ -32,6 +32,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
   const [provider, setProvider] = useState(initial.provider);
   const [apiKey, setApiKey] = useState(initial.apiKey || "");
   const [model, setModel] = useState(initial.model || "");
+  const [contextWindow, setContextWindow] = useState(initial.contextWindowTokens || "");
   const [customUrl, setCustomUrl] = useState(initial.baseUrl || "");
   const [customProtocol, setCustomProtocol] = useState(initial.protocol || "openai");
   const [customReasoningEffort, setCustomReasoningEffort] = useState(initial.reasoningEffort || "auto");
@@ -73,6 +74,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
     setApiKey(p.apiKey || "");
     setModel(p.model || "");
     setCustomUrl(p.baseUrl || "");
+    setContextWindow(p.contextWindowTokens || "");
     setCustomProtocol(p.protocol || "openai");
     setCustomReasoningEffort(p.reasoningEffort || "auto");
     setFetchedModels([]);
@@ -104,6 +106,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
         reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       });
       refreshProfiles(p.id);
       loadProfile(p, "已新建配置，请填写账号信息后保存");
@@ -150,6 +153,9 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
 
   function save() {
     try {
+      if (contextWindow !== "" && (!Number.isSafeInteger(Number(contextWindow)) || Number(contextWindow) <= 0)) {
+        throw new Error("上下文窗口须填写正整数，或留空自动选择");
+      }
       let p;
       const values = {
         name: profileName,
@@ -159,6 +165,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
         reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       };
       if (store.updateModelProfile) {
         p = store.updateModelProfile(profileId, values);
@@ -343,13 +350,20 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
           </select>
         </label>
         <label className="settings-pane__field">
+          上下文窗口（token，留空自动）
+          <input type="number" min="1" step="1" value={contextWindow}
+            placeholder="DeepSeek V4 自动使用 1000000"
+            onChange={e => { setContextWindow(e.target.value); setStatus(""); }} />
+        </label>
+        <span className="settings-pane__hint">中转服务限制较小时，填写该服务实际支持的窗口上限。</span>
+        <label className="settings-pane__field">
           长会话策略
           <select value={contextStrategy} onChange={e => { setContextStrategy(e.target.value); setStatus(""); }}>
-            <option value="projected">持久化上下文投影（推荐）</option>
+            <option value="projected">任务卡＋滚动摘要（推荐）</option>
             <option value="legacy">旧完整历史（兼容）</option>
           </select>
         </label>
-        <span className="settings-pane__hint">完整对话始终保留；切换策略从下一轮生效。</span>
+        <span className="settings-pane__hint">推荐策略保留原始对话与工具执行记录；切换从下一轮生效。</span>
       </section>
 
       {error && <div className="settings-pane__error">{error}</div>}

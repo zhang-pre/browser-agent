@@ -10,13 +10,17 @@
  *   modelStrategy = "balanced" | "premium"，先作为 Agent 调度上下文，后续可映射到具体 provider/model。
  */
 
-import { normalizeContextProjection, projectMessages } from "./ContextProjection.sys.mjs";
+import { normalizeContextProjection } from "./ContextProjection.sys.mjs";
 import { emptyUsage, mergeUsage } from "../llm/Usage.sys.mjs";
+import {
+  appendUnifiedEvents, commitUnifiedCompaction, commitUnifiedRewrite, createUnifiedContext,
+  normalizeUnifiedContext, projectUnifiedMessages,
+} from "./UnifiedContext.sys.mjs";
 
 const DIR_NAME = "firefox-reverse-agent";
 const FILE_NAME = "conversations.json";
 const NEW_TITLE = "新对话";
-const STORE_SCHEMA_VERSION = 3;
+const STORE_SCHEMA_VERSION = 4;
 const EXPORT_FORMAT = "firefox-reverse-conversation";
 const EXPORT_SCHEMA_VERSION = 1;
 const MAX_IMPORT_CHARS = 10 * 1024 * 1024;
@@ -46,6 +50,22 @@ function cleanTitle(value) {
 
 function normalizeThread(t) {
   const messages = Array.isArray(t.messages) ? t.messages : [];
+  const legacyProjection = normalizeContextProjection(t.contextProjection, messages.length);
+  let unified;
+  try {
+    unified = normalizeUnifiedContext(t.unifiedContext, messages);
+  } catch {
+    unified = createUnifiedContext(messages);
+  }
+  if (!t.unifiedContext && legacyProjection?.summary && legacyProjection.cutoff > 0) {
+    const covered = Math.min(unified.lastId, legacyProjection.cutoff);
+    unified.compaction = {
+      version: 1, taskCardVersion: unified.taskCard.version,
+      coveredFrom: 1, coveredThrough: covered, recentFrom: covered + 1,
+      snapshotHead: unified.lastId, summary: legacyProjection.summary,
+      evidenceRefs: [], tokensBefore: 0, tokensAfter: 0,
+    };
+  }
   return {
     ...t,
     workspace: t.workspace || null,
@@ -55,7 +75,8 @@ function normalizeThread(t) {
     lastTurnStatus: TURN_STATUSES.has(t.lastTurnStatus) ? t.lastTurnStatus : "idle",
     cancellationPending: t.cancellationPending === true,
     cancelledAt: Number.isFinite(t.cancelledAt) ? t.cancelledAt : null,
-    contextProjection: normalizeContextProjection(t.contextProjection, messages.length),
+    contextProjection: legacyProjection,
+    unifiedContext: unified,
     usage: mergeUsage(t.usage || emptyUsage()),
     messages,
   };
@@ -101,6 +122,7 @@ export class ConversationStore {
     this._mem = null; // { threads: [...] }
     this._path = opts.path || null;
     this._memoryOnly = opts.memoryOnly ?? !hasIO();
+    this._saveChain = Promise.resolve();
   }
 
   get isPersistent() {
@@ -140,8 +162,12 @@ export class ConversationStore {
     if (this._memoryOnly) {
       return;
     }
-    const p = await this._filePath();
-    await IOUtils.writeJSON(p, this._mem, { tmpPath: p + ".tmp" });
+    const operation = this._saveChain.catch(() => {}).then(async () => {
+      const p = await this._filePath();
+      await IOUtils.writeJSON(p, this._mem, { tmpPath: p + ".tmp" });
+    });
+    this._saveChain = operation;
+    await operation;
   }
 
   /** 线程摘要列表（按更新时间倒序），不含 messages。 */
@@ -180,10 +206,11 @@ export class ConversationStore {
     const messages = t.messages.map(message => ({
       role: message.role,
       content: message.content,
+      ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
     }));
     return strategy === "legacy"
       ? messages
-      : projectMessages(messages, t.contextProjection);
+      : projectUnifiedMessages(t.unifiedContext || createUnifiedContext(messages));
   }
 
   async createThread(title = NEW_TITLE, workspace = null, mode = null) {
@@ -202,6 +229,7 @@ export class ConversationStore {
       cancellationPending: false,
       cancelledAt: null,
       contextProjection: null,
+      unifiedContext: createUnifiedContext(),
       usage: emptyUsage(),
       messages: [],
     };
@@ -301,13 +329,86 @@ export class ConversationStore {
     if (!t) {
       throw new Error("conversation thread not found: " + id);
     }
-    t.messages.push({ role: msg.role, content: msg.content, ...(msg.steps ? { steps: msg.steps } : {}) });
+    const previousContext = t.unifiedContext;
+    const previousTitle = t.title;
+    const previousUpdatedAt = t.updatedAt;
+    if (msg.skipContext !== true) {
+      t.unifiedContext = appendUnifiedEvents(
+        previousContext || createUnifiedContext(t.messages),
+        [{ ...msg, newTask: msg.role === "user" && t.cancellationPending === true }]
+      ).state;
+    }
+    t.messages.push({ role: msg.role, content: msg.content,
+      ...(msg.reasoning_content !== undefined ? { reasoning_content: msg.reasoning_content } : {}),
+      ...(msg.steps ? { steps: msg.steps } : {}) });
     t.updatedAt = nextTs();
     if (t.title === NEW_TITLE && msg.role === "user" && msg.content) {
       t.title = msg.content.replace(/\s+/g, " ").trim().slice(0, 30) || NEW_TITLE;
     }
-    await this._save();
+    try {
+      await this._save();
+    } catch (error) {
+      t.messages.pop();
+      t.unifiedContext = previousContext;
+      t.title = previousTitle;
+      t.updatedAt = previousUpdatedAt;
+      throw error;
+    }
     return t;
+  }
+
+  /** Append model-visible execution events after a complete tool batch. */
+  async appendContextEvents(id, messages) {
+    const d = await this._load();
+    const t = d.threads.find(x => x.id === id);
+    if (!t) throw new Error("conversation thread not found: " + id);
+    const previous = t.unifiedContext;
+    const { state, events } = appendUnifiedEvents(previous || createUnifiedContext(t.messages), messages);
+    t.unifiedContext = state;
+    try {
+      await this._save();
+    } catch (error) {
+      t.unifiedContext = previous;
+      throw error;
+    }
+    return { state: normalizeUnifiedContext(state), events };
+  }
+
+  async getUnifiedContext(id) {
+    const t = await this.getThread(id);
+    if (!t) throw new Error("conversation thread not found: " + id);
+    return normalizeUnifiedContext(t.unifiedContext, t.messages);
+  }
+
+  /** Commit only against the snapshot and task-card version used by the summarizer. */
+  async commitUnifiedCompaction(id, plan, summary, metadata = {}) {
+    const d = await this._load();
+    const t = d.threads.find(x => x.id === id);
+    if (!t) throw new Error("conversation thread not found: " + id);
+    const previous = t.unifiedContext;
+    t.unifiedContext = commitUnifiedCompaction(previous, plan, summary, metadata);
+    try {
+      await this._save();
+    } catch (error) {
+      t.unifiedContext = previous;
+      throw error;
+    }
+    return normalizeUnifiedContext(t.unifiedContext);
+  }
+
+  async commitUnifiedRewrite(id, snapshot, summary, metadata = {}) {
+    const d = await this._load();
+    const t = d.threads.find(x => x.id === id);
+    if (!t) throw new Error("conversation thread not found: " + id);
+    const previous = t.unifiedContext;
+    t.unifiedContext = commitUnifiedRewrite(previous, snapshot, summary, metadata);
+    try {
+      await this._save();
+    } catch (error) {
+      t.unifiedContext = previous;
+      throw error;
+    }
+    return normalizeUnifiedContext(t.unifiedContext);
   }
 
   /** Atomically replace the model-only continuation projection. */
@@ -455,6 +556,7 @@ export class ConversationStore {
       cancellationPending: false,
       cancelledAt: null,
       contextProjection: null,
+      unifiedContext: createUnifiedContext(messages),
       usage: emptyUsage(),
       importedFrom: {
         sourceThreadId: String(src.sourceThreadId || "").slice(0, 200) || null,

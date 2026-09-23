@@ -21,10 +21,14 @@ const MAX_AUTO_CONTINUE = 3;
 // 这**不是**"模型漂走不动手"(drift)，而是"该少想多做"——若把它当 autoContinue 累计，3 次就误判 drift、
 // 外层再两轮 drift 就"已停下"→ 用户看到的"DeepSeek 跑一会突然截断然后会话停了"。故截断走独立计数、不污染 drift。
 const MAX_TRUNC_RETRIES = 6;
-// 回灌给下一轮的 reasoning_content 上限：思考型模型每轮 reasoning 可达数千字，整段回灌会撑爆 80K 上下文
-// → trimContext 把真正的工具结果挤掉 → 模型丢状态、反复重读重跑(兜圈子)。只留尾部(结论/"所以我要调用X"常在尾部)，
-// 既满足"必须带 reasoning_content 字段"的中转，又不让它吃上下文。(Anthropic/Opus 不回灌这段，故无此问题。)
-const REASONING_FEEDBACK_CAP = 1200;
+// Preserve provider reasoning verbatim. Context reduction must evict complete
+// interactions instead of truncating protocol fields.
+function assistantReply(res, content = res.content ?? "") {
+  return {
+    role: "assistant", content,
+    ...(res.reasoningContent !== undefined ? { reasoning_content: res.reasoningContent } : {}),
+  };
+}
 
 // A2 重复熔断**豁免名单**：这些工具"同参重复"是正当的——每次都有真实副作用或推进世界状态，
 // 不是空转。page_scroll 滚动加载新内容、page_navigate 重载、trace start/stop/clear 开关、
@@ -281,6 +285,7 @@ export async function runAgentTurn(p) {
     assist = false, // AI辅助逐阶段模式：无工具的纯文字回复=正常收尾（停下报告+给方向），不当 drift 逼它继续
     vision = false, // 模型是否支持看图：true 时把截图等图像作为 user 图片消息回喂
     contextStrategy = "legacy", // projected=小上下文+大结果折叠；legacy=旧行为，可随时回退
+    journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
     cacheKey = "",
   } = p || {};
 
@@ -311,7 +316,7 @@ export async function runAgentTurn(p) {
       // then AgentLoop folds it before the next model request.
       router.maxChars =
         contextStrategy === "projected"
-          ? Math.max(_bud.resultCap, 256 * 1024)
+          ? Number.MAX_SAFE_INTEGER
           : _bud.resultCap;
     }
   } catch {
@@ -326,19 +331,20 @@ export async function runAgentTurn(p) {
     }
   };
 
-  const turnContext = await createTurnContext({
-    client, messages, systemPrompt, dynamicContext, getLedger,
-    signal, onUsage, cacheKey, onCheckpoint, onEvent: emit, budget: _bud,
-  });
-  let msgs = turnContext.initialMessages;
-
-  // Stable order is part of the provider cache prefix.
+  // Stable order is part of the provider cache prefix and budget estimate.
   const tools = router
     .listSpecs()
     .slice()
     .sort((a, b) =>
       String(a?.function?.name || "").localeCompare(String(b?.function?.name || ""))
     );
+  const turnContext = await createTurnContext({
+    client, messages, systemPrompt, dynamicContext, getLedger,
+    signal, onUsage, cacheKey, onCheckpoint, onEvent: emit, budget: _bud,
+    contextStrategy, journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
+    toolSpecs: tools, contextWindowTokens: client.contextWindowTokens || client.config?.contextWindowTokens,
+  });
+  let msgs = turnContext.initialMessages;
   const allToolCalls = [];
   const toolCounts = {}; // 每个工具本回合调用次数（防打转）
   const failSigs = {}; // (工具+错误签名) → 次数（反绕圈：同错反复出现就提示换路线）
@@ -356,9 +362,11 @@ export async function runAgentTurn(p) {
 
   async function applySteering() {
     if (signal?.aborted || typeof consumeSteering !== "function") return false;
+    if (contextStrategy === "projected") await turnContext.sync(msgs);
     const incoming = await consumeSteering();
     if (signal?.aborted || !incoming?.length) return false;
     turnContext.appendSteering(msgs, incoming);
+    if (contextStrategy === "projected") await turnContext.refresh();
     autoContinues = 0;
     truncRetries = 0;
     return true;
@@ -367,6 +375,7 @@ export async function runAgentTurn(p) {
   for (let round = 1; round <= maxRounds; round++) {
     // 手动停止（侧边栏「停止」按钮 abort）：在轮次边界干净退出，返回已有进展。
     if (signal && signal.aborted) {
+      if (contextStrategy === "projected") await turnContext.sync(msgs);
       emit({ type: "aborted", round });
       return {
         content: "（已手动停止）",
@@ -385,13 +394,19 @@ export async function runAgentTurn(p) {
     await applySteering();
     if (signal?.aborted) break;
     emit({ type: "round", round });
-    const res = await client.chat(turnContext.requestMessages(msgs), {
-      tools,
-      signal,
-      onDelta,
-      onReasoning,
-      cacheKey,
-    });
+    let res;
+    try {
+      res = await client.chat(turnContext.requestMessages(msgs), {
+        tools, signal, onDelta, onReasoning, cacheKey,
+      });
+    } catch (error) {
+      const overflow = /context.{0,30}(length|window|limit|exceed)|token.{0,30}(limit|exceed)|maximum context|too many tokens/i.test(String(error?.message || error));
+      if (contextStrategy !== "projected" || !overflow || typeof turnContext.forceCompact !== "function") throw error;
+      msgs = await turnContext.forceCompact(round, msgs);
+      res = await client.chat(turnContext.requestMessages(msgs), {
+        tools, signal, onDelta, onReasoning, cacheKey,
+      });
+    }
     try {
       onUsage && onUsage(res.usage, { phase: "chat" });
     } catch {
@@ -400,7 +415,7 @@ export async function runAgentTurn(p) {
 
     const toolCalls = res.toolCalls || [];
     if (toolCalls.length === 0 && hasSteering() && !signal?.aborted) {
-      msgs.push({ role: "assistant", content: res.content || "" });
+      msgs.push(assistantReply(res));
       await applySteering();
       continue;
     }
@@ -422,7 +437,7 @@ export async function runAgentTurn(p) {
 
       // 【截断专用处理】(Fix 1)：与 drift/autoContinue **完全解耦**。截断不是"漂移不动手"，是"想太多被切"——
       // 若按 autoContinue 累计，3 次就误判 drift、外层再两轮 drift 即"已停下"=用户实测的"DeepSeek 跑一会突然
-      // 截断然后会话停了"。故：不碰 autoContinues、不把那半截废思考回灌（白占 80K 预算还会顺着想下去），
+      // 截断然后会话停了"。故：不碰 autoContinues、思考字段按协议完整回传，
       // 只塞一条硬指令逼它这轮极简推理直奔工具调用，retry。仅当连续截断到上限才停（且给可行动报告，不走 drift）。
       if (truncated) {
         truncRetries++;
@@ -433,13 +448,14 @@ export async function runAgentTurn(p) {
               (res.content || "") +
               `\n\n（已停下）模型连续把输出预算耗在"思考"上、始终没发出工具调用就被长度限制切断` +
               `（思考型模型的 reasoning 无法靠提示压住）。进展已落盘。建议换更稳的模型（如 Claude）续跑，或把该模型 max_tokens 调大。`,
+            reasoningContent: res.reasoningContent,
             rounds: round,
             toolCalls: allToolCalls,
             messages: msgs,
             stopReason: "final", // 走 final 停下等用户决策；**不**走 drift（drift 两轮即停且文案误导成"只在描述分析"）
           };
         }
-        msgs.push({ role: "assistant", content: txt || "（上轮思考超长被截断）" });
+        msgs.push(assistantReply(res, txt || "（上轮思考超长被截断）"));
         msgs.push({
           role: "user",
           content:
@@ -471,6 +487,7 @@ export async function runAgentTurn(p) {
         emit({ type: "final", content: res.content + driftDiag, round });
         return {
           content: (res.content || "") + driftDiag,
+          reasoningContent: res.reasoningContent,
           rounds: round,
           toolCalls: allToolCalls,
           messages: msgs,
@@ -480,7 +497,7 @@ export async function runAgentTurn(p) {
       }
       // 漂走/只说计划 → 推进它真的动手，不结束本轮。
       autoContinues++;
-      msgs.push({ role: "assistant", content: txt });
+      msgs.push(assistantReply(res, txt));
       msgs.push({
         role: "user",
         content:
@@ -495,22 +512,19 @@ export async function runAgentTurn(p) {
     autoContinues = 0; // 有真实工具调用 → 清零（只数"连续纯文字空转"）
     truncRetries = 0; // 成功产出工具调用 → 清零截断重试计数（只数**连续**截断，免长会话零星截断攒到上限误停）
 
-    // 回灌：assistant 的 tool_calls 消息必须原样保留，再跟每个 tool 结果。
-    // 思考型模型(deepseek-v4-pro 等)要求把本轮 reasoning_content 一并回灌，否则下一轮 400；
-    // 但整段 reasoning 每轮可达数千字，全回灌会撑爆 80K 上下文、把真工具结果挤掉 → 模型丢状态、反复重读重跑(兜圈子)。
-    // 故只回灌尾部 REASONING_FEEDBACK_CAP 字（结论/"所以我现在要调用 X"通常落在尾部）：既满足"字段在"、又不吃上下文。
-    const asstMsg = { role: "assistant", content: res.content ?? "", tool_calls: toolCalls };
-    if (res.reasoningContent) {
-      asstMsg.reasoning_content =
-        res.reasoningContent.length > REASONING_FEEDBACK_CAP
-          ? "…" + res.reasoningContent.slice(-REASONING_FEEDBACK_CAP)
-          : res.reasoningContent;
-    }
+    // Keep the complete assistant response paired with all tool results.
+    const asstMsg = { ...assistantReply(res), tool_calls: toolCalls };
     msgs.push(asstMsg);
 
     for (const tc of toolCalls) {
       if (signal && signal.aborted) {
-        break; // 手动停止：跳出，外层轮次边界会干净返回
+        for (const skipped of toolCalls.slice(toolCalls.indexOf(tc))) {
+          msgs.push({
+            role: "tool", tool_call_id: skipped.id,
+            content: JSON.stringify({ ok: false, skipped: true, error: "Skipped: manually stopped" }),
+          });
+        }
+        break;
       }
       if (hasSteering()) {
         // Finish the protocol batch before inserting any new user messages.
@@ -617,9 +631,9 @@ export async function runAgentTurn(p) {
       // → 请求体越来越大 → 模型 TTFT 超过空闲看门狗(默认300s)一字未回 → 误报「连接超时」/撞上下文窗。
       // 大结果只截给模型一个头部 + 可操作提示；完整内容仍在侧栏事件与落盘文件里，要细节让模型分段 fs_read。
       let contentStr = JSON.stringify(envText);
+      let artifact = null;
       if (contentStr.length > resultCap) {
         const originalChars = contentStr.length;
-        let artifact = null;
         if (typeof persistToolArtifact === "function") {
           try {
             artifact = await persistToolArtifact({
@@ -632,18 +646,22 @@ export async function runAgentTurn(p) {
             /* artifact persistence is optional */
           }
         }
-        const reference = artifact?.path
-          ? `折叠前结果已保存到 ${artifact.path}；需要细节请用 fs_read 分段读取或 code_search 精确搜索。`
-          : "未设置工作目录或保存失败；需要细节请缩小查询范围后重新获取。";
-        const marker =
-          `\n…⟪旧工具输出已折叠，原始 ${originalChars} 字符。${reference}⟫…\n`;
-        const room = Math.max(1000, resultCap - marker.length);
-        const headChars = Math.floor(room * 0.65);
-        const tailChars = room - headChars;
-        contentStr =
-          contentStr.slice(0, headChars) +
-          marker +
-          contentStr.slice(-tailChars);
+        // Without an artifact, keep the full result in the event log. The
+        // request budget gate will stop if this group cannot fit.
+        if (contextStrategy !== "projected" || artifact?.path) {
+          const reference = artifact?.path
+            ? `折叠前结果已保存到 ${artifact.path}；需要细节请用 fs_read 分段读取或 code_search 精确搜索。`
+            : "未设置工作目录或保存失败；需要细节请缩小查询范围后重新获取。";
+          const marker =
+            `\n…⟪旧工具输出已折叠，原始 ${originalChars} 字符。${reference}⟫…\n`;
+          const room = Math.max(1000, resultCap - marker.length);
+          const headChars = Math.floor(room * 0.65);
+          const tailChars = room - headChars;
+          contentStr =
+            contentStr.slice(0, headChars) +
+            marker +
+            contentStr.slice(-tailChars);
+        }
       }
       // 反绕圈护栏：同一(工具+错误签名)累计到阈值 → 在结果里注入"换路线"硬提示（依据 skill §6 决策树）。
       const sig = _errSig(name, env);
@@ -680,6 +698,7 @@ export async function runAgentTurn(p) {
         role: "tool",
         tool_call_id: tc.id,
         content: contentStr,
+        ...(artifact ? { artifact } : {}),
       });
 
       // 视觉回喂：模型支持看图时，把图像作为 user 图片消息追加，让模型"看见"页面。
@@ -715,6 +734,7 @@ export async function runAgentTurn(p) {
   }
 
   if (signal?.aborted || hasSteering()) {
+    if (contextStrategy === "projected") await turnContext.sync(msgs);
     return {
       content: signal?.aborted ? "（已手动停止）" : "",
       rounds: maxRounds, toolCalls: allToolCalls, messages: msgs,
@@ -724,19 +744,29 @@ export async function runAgentTurn(p) {
   emit({ type: "max_rounds", maxRounds });
   // 轮数用尽：不带工具再问一次，逼模型基于已有工具结果直接给结论，而不是空停。
   let summary = "";
+  let finalReasoning;
   try {
-    const fin = await client.chat(turnContext.requestMessages(msgs), {
-      signal,
-      onDelta,
-      onReasoning,
-      cacheKey,
-    });
+    msgs = await turnContext.compact(maxRounds + 1, msgs);
+    let fin;
+    try {
+      fin = await client.chat(turnContext.requestMessages(msgs), {
+        signal, onDelta, onReasoning, cacheKey,
+      });
+    } catch (error) {
+      const overflow = /context.{0,30}(length|window|limit|exceed)|token.{0,30}(limit|exceed)|maximum context|too many tokens/i.test(String(error?.message || error));
+      if (contextStrategy !== "projected" || !overflow) throw error;
+      msgs = await turnContext.forceCompact(maxRounds + 1, msgs);
+      fin = await client.chat(turnContext.requestMessages(msgs), {
+        signal, onDelta, onReasoning, cacheKey,
+      });
+    }
     try {
       onUsage && onUsage(fin.usage, { phase: "final" });
     } catch {
       /* usage reporting never blocks the Agent */
     }
     summary = fin.content || "";
+    finalReasoning = fin.reasoningContent;
   } catch {
     /* 总结失败就退回提示 */
   }
@@ -745,6 +775,7 @@ export async function runAgentTurn(p) {
     content:
       summary ||
       `（已达最大轮数 ${maxRounds}，仍未得出结论。可换个问法、缩小范围，或分步让我做。）`,
+    reasoningContent: finalReasoning,
     rounds: maxRounds,
     toolCalls: allToolCalls,
     messages: msgs,

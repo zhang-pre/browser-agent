@@ -288,6 +288,7 @@ export function buildClientFromStore(store, overrides = {}) {
       overrides.model ||
       (profile ? profile.model : store.getModel(id)) ||
       p.defaultModel,
+    contextWindowTokens: overrides.contextWindowTokens ?? profile?.contextWindowTokens,
     promptCacheMode:
       overrides.promptCacheMode ||
       (store.getPromptCacheMode && store.getPromptCacheMode()) ||

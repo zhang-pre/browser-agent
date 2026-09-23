@@ -2,6 +2,7 @@
  *   node dev/selftest-conversations.mjs
  */
 import { ConversationStore } from "../modules/state/ConversationStore.sys.mjs";
+import { planUnifiedCompaction } from "../modules/state/UnifiedContext.sys.mjs";
 
 let pass = 0, fail = 0;
 const ok = (c, m) => (c ? (pass++, console.log("  ✓", m)) : (fail++, console.error("  ✗ FAIL:", m)));
@@ -38,8 +39,13 @@ await s.setContextProjection(longThread.id, {
   updatedAt: 2,
   strategy: "projected",
 });
+const journal = await s.getUnifiedContext(longThread.id);
+const plan = planUnifiedCompaction(journal, { triggerTokens: 1, targetTokens: 1000, recentTokens: 1500 });
+await s.commitUnifiedCompaction(longThread.id, plan, "已确认事实和下一步");
 const projected = await s.getModelMessages(longThread.id, { strategy: "projected" });
-ok(projected.length < 10 && projected[2].role === "user", "模型历史使用持久化投影并从安全边界续接");
+ok(projected.length < 10 && projected[0].content.includes("任务卡") &&
+   projected[1].content.includes("已确认事实和下一步") &&
+   projected.at(-1)._contextEventId === 10, "模型视图使用统一任务卡、累计状态和近期原文");
 ok((await s.getThread(longThread.id)).messages.length === 10, "投影不删除 UI 完整历史");
 await s.addThreadUsage(longThread.id, {
   requests: 2,
@@ -100,6 +106,26 @@ try {
 } finally {
   if (savedIOUtils === undefined) delete globalThis.IOUtils;
   else globalThis.IOUtils = savedIOUtils;
+}
+const savedLegacyIO = globalThis.IOUtils;
+globalThis.IOUtils = {
+  readJSON: async () => ({ threads: [{
+    ...t1,
+    unifiedContext: undefined,
+    contextProjection: {
+      version: 1, summary: "旧版已验证状态", cutoff: 1, sourceCount: 1,
+      createdAt: 1, updatedAt: 2,
+    },
+  }] }),
+};
+try {
+  const oldStore = new ConversationStore({ memoryOnly: false, path: "projection-migration.json" });
+  const migrated = await oldStore.getModelMessages(t1.id, { strategy: "projected" });
+  ok(migrated.some(m => m.content.includes("旧版已验证状态")) &&
+     migrated.at(-1).content === "...", "旧版持久化投影迁移到统一累计状态");
+} finally {
+  if (savedLegacyIO === undefined) delete globalThis.IOUtils;
+  else globalThis.IOUtils = savedLegacyIO;
 }
 ok(imported.workspace === null && imported.envId === null && imported.lastTurnStatus === "idle", "导入会话保持静止且不绑定本机资源");
 ok(imported.contextProjection === null && imported.usage.requests === 0, "导入不携带运行期投影和 Usage");

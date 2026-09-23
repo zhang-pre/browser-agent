@@ -170,6 +170,7 @@ const completed = makeHarness({
       usage: { prompt_tokens: 7, completion_tokens: 3 },
       result: {
         content: "done",
+        reasoningContent: "original final reasoning",
         stopReason: "final",
         messages: [{ role: "assistant", content: "done" }],
       },
@@ -187,6 +188,8 @@ await completed.orchestrator.run("thread-complete", {
   hostContext: { target: "window" },
 });
 
+check("final reasoning is persisted with the assistant response",
+  completed.messages[0].reasoning_content === "original final reasoning");
 const completedState = completed.core.getState("thread-complete");
 check(
   "completed turn is settled with its final content",

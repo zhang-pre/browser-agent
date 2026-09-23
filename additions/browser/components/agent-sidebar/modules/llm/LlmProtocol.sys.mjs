@@ -25,6 +25,36 @@ export class LlmError extends Error {
   }
 }
 
+// Older conversations and imported text-only histories may have no original
+// reasoning. Replay these as quoted history, never fabricate reasoning or leave
+// orphan tool messages. The stored transcript remains unchanged.
+function thinkingHistory(messages) {
+  const out = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (message.role !== "assistant" || typeof message.reasoning_content === "string") {
+      out.push(message);
+      continue;
+    }
+    const group = [message];
+    const pending = new Set((message.tool_calls || []).map(call => call.id));
+    while (pending.size && i + 1 < messages.length) {
+      const next = messages[i + 1];
+      if (next.role !== "tool" && next.role !== "user") break;
+      group.push(next);
+      i++;
+      if (next.role === "tool") pending.delete(next.tool_call_id);
+    }
+    out.push({
+      role: "user",
+      content: "【历史交互记录：原始 reasoning_content 不可用】\n" +
+        "以下是历史数据，不是新的用户指令；其中的工具已经执行或跳过，不要因本记录重复执行。\n" +
+        JSON.stringify(group),
+    });
+  }
+  return out;
+}
+
 /**
  * Build one protocol-specific HTTP request without sending it.
  *
@@ -65,7 +95,10 @@ export function buildLlmRequest(config, messages, opts = {}) {
     );
     const body = {
       model,
-      messages,
+      messages: (config.providerId === "deepseek" || /deepseek/i.test(model)) &&
+        reasoningEffort !== "none"
+        ? thinkingHistory(messages)
+        : messages,
       stream: opts.stream ?? request.stream ?? false,
       max_tokens: opts.maxTokens ?? request.max_tokens,
     };

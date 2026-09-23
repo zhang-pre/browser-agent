@@ -46,6 +46,8 @@ function normalizeProfile(raw = {}) {
     baseUrl: String(raw.baseUrl || "").trim(),
     protocol: raw.protocol === "anthropic" ? "anthropic" : "openai",
     reasoningEffort: normalizeReasoningEffort(raw.reasoningEffort || "auto"),
+    contextWindowTokens: Number.isFinite(raw.contextWindowTokens) && raw.contextWindowTokens > 0
+      ? Math.floor(raw.contextWindowTokens) : null,
     createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : Date.now(),
   };

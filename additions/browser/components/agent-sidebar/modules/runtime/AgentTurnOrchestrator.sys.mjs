@@ -10,12 +10,6 @@ import {
   assertAgentBackendsPort,
   assertAgentRouterPort,
 } from "./AgentRuntimePorts.sys.mjs";
-import {
-  buildProjectionInput,
-  CONTEXT_PROJECTION_PROMPT,
-  CONTEXT_PROJECTION_VERSION,
-  planContextProjection,
-} from "../state/ContextProjection.sys.mjs";
 import { emptyUsage, mergeUsage, normalizeUsage } from "../llm/Usage.sys.mjs";
 
 const CANCELLED_TURN_BOUNDARY =
@@ -115,7 +109,9 @@ export class AgentTurnOrchestrator {
           message => message && message.role !== "system"
         );
         if (result?.content) {
-          context.turnMessages.push({ role: "assistant", content: result.content });
+          context.turnMessages.push({ role: "assistant", content: result.content,
+            ...(result.reasoningContent !== undefined ? { reasoning_content: result.reasoningContent } : {}),
+          });
         }
       }
       // Close admission synchronously before any terminal persistence awaits.
@@ -163,6 +159,15 @@ export class AgentTurnOrchestrator {
     context.recordUsage = (raw, info = {}) => this._recordUsage(context, raw, info);
     context.vision = this._detectVision(context.client);
     context.turnMessages = await this._loadTurnMessages(context);
+    if (context.state.contextStrategy === "projected") {
+      if (!this.conversationStore.getUnifiedContext ||
+          !this.conversationStore.appendContextEvents ||
+          !this.conversationStore.commitUnifiedCompaction ||
+          !this.conversationStore.commitUnifiedRewrite) {
+        throw new Error("projected context requires a unified conversation store");
+      }
+      context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
+    }
   }
 
   async _consumeCancellationBoundary(context) {
@@ -232,60 +237,21 @@ export class AgentTurnOrchestrator {
       const fullMessages = thread.messages.map(message => ({
         role: message.role,
         content: message.content,
+        ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
       }));
       if (context.state.contextStrategy !== "projected") {
         return fullMessages;
       }
-      await this._updateProjection(context, thread, fullMessages);
       const messages = await this.conversationStore.getModelMessages(
         context.threadId,
         { strategy: "projected" }
       );
       const latest = await this.conversationStore.getThread(context.threadId);
-      context.state.contextProjected = !!latest?.contextProjection;
+      context.state.contextProjected = !!latest?.unifiedContext?.compaction;
       return messages;
     } catch {
       return await this._projectionFallback(context, fallback);
     }
-  }
-
-  async _updateProjection(context, thread, fullMessages) {
-    const plan = planContextProjection(fullMessages, thread.contextProjection);
-    if (!plan) {
-      return;
-    }
-    const source = buildProjectionInput(fullMessages, plan);
-    const projected = await context.client.chat(
-      [
-        { role: "system", content: CONTEXT_PROJECTION_PROMPT },
-        {
-          role: "user",
-          content:
-            "Update the continuation record from this bounded source:\n\n" +
-            source,
-        },
-      ],
-      {
-        signal: context.abortController.signal,
-        maxTokens: 2048,
-        cacheKey: context.cacheKey + ":projection",
-      }
-    );
-    context.recordUsage(projected.usage, { phase: "projection" });
-    const summary = String(projected.content || "").trim();
-    if (!summary) {
-      return;
-    }
-    const timestamp = this.now();
-    await this.conversationStore.setContextProjection(context.threadId, {
-      version: CONTEXT_PROJECTION_VERSION,
-      summary,
-      cutoff: plan.cutoff,
-      sourceCount: plan.cutoff,
-      createdAt: plan.previous?.createdAt || timestamp,
-      updatedAt: timestamp,
-      strategy: "projected",
-    });
   }
 
   async _projectionFallback(context, fallback) {
@@ -295,7 +261,7 @@ export class AgentTurnOrchestrator {
         { strategy: context.state.contextStrategy }
       );
       const latest = await this.conversationStore.getThread(context.threadId);
-      context.state.contextProjected = !!latest?.contextProjection;
+      context.state.contextProjected = !!latest?.unifiedContext?.compaction;
       return messages;
     } catch {
       return fallback;
@@ -308,6 +274,9 @@ export class AgentTurnOrchestrator {
     let driftStreak = 0;
 
     for (;;) {
+      if (context.state.contextStrategy === "projected") {
+        context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
+      }
       const result = await this.runAgentTurn(
         this._buildLoopOptions(context, turnMessages)
       );
@@ -340,7 +309,8 @@ export class AgentTurnOrchestrator {
       await this._persist(
         context.threadId,
         result.content || "（继续推进）",
-        context.state.steps
+        context.state.steps,
+        { reasoningContent: result.reasoningContent }
       );
       this._startNextSegment(context.state);
       turnMessages = (result.messages || turnMessages).filter(
@@ -395,6 +365,19 @@ export class AgentTurnOrchestrator {
         }
       },
       contextStrategy: state.contextStrategy,
+      journal: context.journal,
+      onContextAppend: events => this.conversationStore.appendContextEvents(context.threadId, events),
+      onContextCommit: (plan, summary, metadata) => this.conversationStore.commitUnifiedCompaction(context.threadId, plan, summary, metadata),
+      onContextRewrite: (snapshot, summary, metadata) => this.conversationStore.commitUnifiedRewrite(context.threadId, snapshot, summary, metadata),
+      onContextRefresh: () => this.conversationStore.getUnifiedContext(context.threadId),
+      onValidateEvidence: async refs => {
+        if (!refs.length) return;
+        if (!backends.workspace.read) throw new Error("artifact validation requires workspace.read");
+        for (const ref of refs) {
+          const result = await backends.workspace.read({ path: ref.path, offset: 0, limit: 1 }, toolContext);
+          if (!result?.ok || result.size <= 0) throw new Error("context artifact missing: " + ref.path);
+        }
+      },
       cacheKey,
       onUsage: context.recordUsage,
       persistToolArtifact: workspaceRoot
@@ -407,13 +390,14 @@ export class AgentTurnOrchestrator {
               /[^a-zA-Z0-9._-]+/g,
               "_"
             );
-            const path =
-              `.frx-context/tool-results/${this.now()}_${safeName}_${safeId}.json`;
+            const nonce = globalThis.crypto?.randomUUID?.() ||
+              (this.now().toString(36) + "_" + Math.random().toString(36).slice(2));
+            const path = ".frx-context/tool-results/" + nonce + "_" + safeName + "_" + safeId + ".json";
             const saved = await backends.workspace.write(
               { path, content },
               toolContext
             );
-            return { path: saved?.path || path };
+            return { path: saved?.path || path, version: path };
           }
         : null,
       onDelta: chunk => {
@@ -440,14 +424,17 @@ export class AgentTurnOrchestrator {
     const items = this.runtimeCore.takeSteering(state);
     if (!items.length) return [];
     if (state.steps.length) {
-      await this._persist(threadId, textFromSteps(state.steps), state.steps);
+      await this._persist(threadId, textFromSteps(state.steps), state.steps, { skipContext: true });
       this._startNextSegment(state);
     }
     const messages = [];
     for (const item of items) {
       if (context.abortController.signal.aborted) break;
       const message = { role: "user", content: item.content };
-      await this.conversationStore.appendMessage(threadId, message);
+      const saved = await this.conversationStore.appendMessage(threadId, message);
+      if (state.contextStrategy === "projected" && saved?.unifiedContext?.lastId) {
+        message._contextEventId = saved.unifiedContext.lastId;
+      }
       item.status = context.abortController.signal.aborted ? "cancelled" : "applied";
       if (item.status === "applied") {
         messages.push(message);
@@ -476,7 +463,7 @@ export class AgentTurnOrchestrator {
 
   async _checkpoint(context, summary) {
     const { backends, state, threadId, toolContext, workspaceRoot } = context;
-    await this._persist(threadId, summary, state.steps);
+    await this._persist(threadId, summary, state.steps, { skipContext: true });
     if (workspaceRoot) {
       try {
         await backends.workspace.write(
@@ -510,7 +497,7 @@ export class AgentTurnOrchestrator {
       context.abortController.signal.aborted ||
       (result && result.stopReason === "aborted");
     state.content = result?.content || textFromSteps(state.steps) || "";
-    await this._persist(threadId, state.content, state.steps);
+    await this._persist(threadId, state.content, state.steps, { reasoningContent: result?.reasoningContent });
     await this._setTurnStatus(
       threadId,
       state.aborted ? "cancelled" : "completed"
@@ -562,12 +549,14 @@ export class AgentTurnOrchestrator {
     }
   }
 
-  async _persist(threadId, content, steps) {
+  async _persist(threadId, content, steps, { skipContext = false, reasoningContent } = {}) {
     try {
       const slim = slimifySteps(steps);
       await this.conversationStore.appendMessage(threadId, {
         role: "assistant",
         content,
+        skipContext,
+        ...(reasoningContent !== undefined ? { reasoning_content: reasoningContent } : {}),
         ...(slim.length ? { steps: slim } : {}),
       });
     } catch {
