@@ -162,7 +162,7 @@ await runAgentTurn({
     },
   },
   router: { listSpecs: () => [], needsConfirm: () => false, dispatch: async () => ({ ok: true }) },
-  messages: prior, maxRounds: 2, assist: true, autoApprove: true, contextStrategy: "projected",
+  messages: prior, maxRounds: 2, assist: true, autoApprove: true, 
 });
 assert.equal(mainCalls, 2);
 assert.ok(mainSizes[1] < mainSizes[0]);
@@ -191,7 +191,7 @@ await assert.rejects(runAgentTurn({
   journal: await store.getUnifiedContext(noArtifact.id),
   onContextAppend: events => store.appendContextEvents(noArtifact.id, events),
   onContextCommit: (plan, summary, meta) => store.commitUnifiedCompaction(noArtifact.id, plan, summary, meta),
-  contextStrategy: "projected", maxRounds: 2, assist: true, autoApprove: true,
+  maxRounds: 2, assist: true, autoApprove: true,
 }), /context|budget/i);
 const rawArtifactFallback = await store.getUnifiedContext(noArtifact.id);
 assert.ok(rawArtifactFallback.events.some(e => e.role === "tool" && e.content.includes("R".repeat(20000))));
@@ -234,7 +234,7 @@ await runAgentTurn({
     const saved = await store.appendMessage(steerOrder.id, { role: "user", content: text });
     return [{ role: "user", content: text, _contextEventId: saved.unifiedContext.lastId }];
   },
-  contextStrategy: "projected", maxRounds: 3, assist: true, autoApprove: true,
+  maxRounds: 3, assist: true, autoApprove: true,
 });
 const ordered = (await store.getUnifiedContext(steerOrder.id)).events;
 assert.deepEqual(ordered.map(e => e.role), ["user", "assistant", "tool", "tool", "user"]);

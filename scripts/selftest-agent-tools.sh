@@ -36,11 +36,10 @@ SELFTESTS=(
   selftest-ledger-sql.mjs
   selftest-ledger-shutdown.mjs
   selftest-llm-architecture.mjs
-  selftest-context-projection.mjs
+  selftest-context-migration.mjs
   selftest-context-runtime.mjs
   selftest-unified-context.mjs
   selftest-thinking-context.mjs
-  selftest-turn-context.mjs
   selftest-skills.mjs
   selftest-stream.mjs
   selftest-retry.mjs

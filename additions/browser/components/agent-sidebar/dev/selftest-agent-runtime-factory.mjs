@@ -1,3 +1,4 @@
+import { contextStoreFixture } from "./context-store-fixture.mjs";
 import { createAgentRuntime } from "../modules/runtime/AgentRuntime.sys.mjs";
 
 let pass = 0;
@@ -24,9 +25,6 @@ const statuses = [];
 const usages = [];
 
 const config = {
-  getContextStrategy() {
-    return "legacy";
-  },
   getActiveModelProfile() {
     return {
       id: "node-profile",
@@ -43,6 +41,7 @@ const config = {
 };
 
 const conversations = {
+    ...contextStoreFixture(),
   async consumeCancellationBoundary() {
     return false;
   },
@@ -55,7 +54,7 @@ const conversations = {
   async getModelMessages() {
     return [];
   },
-  async setContextProjection() {},
+
   async appendMessage(threadId, message) {
     messages.push({ threadId, ...message });
   },
@@ -205,7 +204,7 @@ check(
   clientCreations.length === 1 &&
     clientCreations[0].config !== config &&
     Object.keys(clientCreations[0].config).sort().join(",") ===
-      "getActiveModelProfile,getActiveProvider,getContextStrategy,getModel" &&
+      "getActiveModelProfile,getActiveProvider,getModel" &&
     clientCreations[0].transport !== transport &&
     typeof clientCreations[0].transport.fetch === "function"
 );

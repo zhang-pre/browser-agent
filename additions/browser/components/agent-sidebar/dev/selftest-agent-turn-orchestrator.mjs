@@ -1,3 +1,4 @@
+import { contextStoreFixture } from "./context-store-fixture.mjs";
 import { AgentRuntimeCore } from "../modules/runtime/AgentRuntimeCore.sys.mjs";
 import { defineAgentRuntimePorts } from "../modules/runtime/AgentRuntimePorts.sys.mjs";
 import { AgentTurnOrchestrator } from "../modules/runtime/AgentTurnOrchestrator.sys.mjs";
@@ -41,6 +42,7 @@ function makeHarness({
     notifyThrottleMs: 0,
   });
   const conversationStore = {
+    ...contextStoreFixture(),
     async consumeCancellationBoundary() {
       return boundary;
     },
@@ -53,7 +55,7 @@ function makeHarness({
     async getModelMessages() {
       return [];
     },
-    async setContextProjection() {},
+
     async appendMessage(threadId, message) {
       messages.push({ threadId, ...message });
     },
@@ -90,7 +92,7 @@ function makeHarness({
       clearTimeout,
     },
     config: {
-      getContextStrategy: () => "legacy",
+
       getActiveModelProfile: () => ({
         id: "profile/main",
         provider: "mock",

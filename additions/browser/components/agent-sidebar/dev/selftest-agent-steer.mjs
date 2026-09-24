@@ -1,3 +1,4 @@
+import { contextStoreFixture } from "./context-store-fixture.mjs";
 import assert from "node:assert/strict";
 import { createAgentRuntime } from "../modules/runtime/AgentRuntime.sys.mjs";
 import { AgentRuntimeCore } from "../modules/runtime/AgentRuntimeCore.sys.mjs";
@@ -19,8 +20,9 @@ async function until(predicate) {
 }
 function harness({ chat, dispatch, confirm = false, append } = {}) {
   const history = [], requests = [], dispatches = [];
+  const contextStore = contextStoreFixture();
   const config = {
-    getContextStrategy: () => "legacy",
+
     getActiveModelProfile: () => null,
     getActiveProvider: () => "test",
     getModel: () => "test",
@@ -44,15 +46,17 @@ function harness({ chat, dispatch, confirm = false, append } = {}) {
     clock: { now: Date.now, setTimeout, clearTimeout },
     config,
     conversations: {
+      ...contextStore,
       consumeCancellationBoundary: async () => false,
       setThreadTurnStatus: async () => {},
       getThread: async () => null,
       getModelMessages: async () => [],
-      setContextProjection: async () => {},
+
       addThreadUsage: async () => {},
       async appendMessage(id, message) {
         if (append) await append(id, message);
         history.push({ id, ...structuredClone(message) });
+        return contextStore.appendMessage(id, message);
       },
     },
     llm: {

@@ -27,7 +27,7 @@ const core = new AgentRuntimeCore({
 
 const state = core.beginRun("thread-1", {
   usage: { requests: 0 },
-  contextStrategy: "projected",
+  
 });
 check("beginRun creates a running state", state.running && !state.settled);
 check("re-entry is rejected", core.beginRun("thread-1") === null);

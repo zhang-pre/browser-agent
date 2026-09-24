@@ -39,7 +39,6 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
   const [confirmTools, setConfirmTools] = useState(store.getConfirmTools ? store.getConfirmTools() : false);
   const [promptCacheMode, setPromptCacheMode] = useState(store.getPromptCacheMode ? store.getPromptCacheMode() : "auto");
   const [promptCacheTtl, setPromptCacheTtl] = useState(store.getPromptCacheTtl ? store.getPromptCacheTtl() : "default");
-  const [contextStrategy, setContextStrategy] = useState(store.getContextStrategy ? store.getContextStrategy() : "projected");
   const [fontScale, setFontScale] = useState(() => store.getSidebarFontScale?.() ?? 100);
   const [fetchedModels, setFetchedModels] = useState([]);
   const [fetchMsg, setFetchMsg] = useState("");
@@ -185,7 +184,6 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       store.setConfirmTools?.(confirmTools);
       store.setPromptCacheMode?.(promptCacheMode);
       store.setPromptCacheTtl?.(promptCacheTtl);
-      store.setContextStrategy?.(contextStrategy);
       loadProfile(p, "已保存并设为当前配置");
     } catch (e) {
       setError((e && e.message) || String(e));
@@ -356,14 +354,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
             onChange={e => { setContextWindow(e.target.value); setStatus(""); }} />
         </label>
         <span className="settings-pane__hint">中转服务限制较小时，填写该服务实际支持的窗口上限。</span>
-        <label className="settings-pane__field">
-          长会话策略
-          <select value={contextStrategy} onChange={e => { setContextStrategy(e.target.value); setStatus(""); }}>
-            <option value="projected">任务卡＋滚动摘要（推荐）</option>
-            <option value="legacy">旧完整历史（兼容）</option>
-          </select>
-        </label>
-        <span className="settings-pane__hint">推荐策略保留原始对话与工具执行记录；切换从下一轮生效。</span>
+
       </section>
 
       {error && <div className="settings-pane__error">{error}</div>}

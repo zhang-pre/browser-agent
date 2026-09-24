@@ -57,7 +57,7 @@ const result = await runAgentTurn({
   systemPrompt: "stable system",
   dynamicContext: "workspace=/tmp/example",
   getLedger: async () => "ledger=fact",
-  contextStrategy: "projected",
+  
   cacheKey: "thread:model:v1",
   autoApprove: true,
   maxRounds: 3,
@@ -81,36 +81,6 @@ ok(folded.length < 13000, "folded tool output is bounded");
 const toolIndex = requests[1].messages.findIndex(m => m.role === "tool");
 ok(toolIndex > 0 && requests[1].messages[toolIndex - 1].role === "assistant", "tool result keeps its assistant tool-call parent");
 ok(usages.length === 2 && usages.every(u => u.info.phase === "chat"), "usage callback covers every main request");
-
-let legacyCall = 0;
-const legacyRequests = [];
-const legacyClient = {
-  model: "small-test",
-  async chat(messages, opts) {
-    legacyRequests.push({ messages, opts });
-    legacyCall++;
-    return legacyCall === 1
-      ? {
-          content: "",
-          toolCalls: [{ id: "legacy", type: "function", function: { name: "alpha", arguments: "{}" } }],
-          usage: null,
-        }
-      : { content: "## 结论\nlegacy ok", toolCalls: [], usage: null };
-  },
-};
-let legacyArtifacts = 0;
-await runAgentTurn({
-  client: legacyClient,
-  router,
-  messages: [{ role: "user", content: "legacy task" }],
-  systemPrompt: "stable system",
-  contextStrategy: "legacy",
-  autoApprove: true,
-  maxRounds: 3,
-  persistToolArtifact: async () => { legacyArtifacts++; return { path: "unused" }; },
-});
-const legacyTool = legacyRequests[1].messages.find(m => m.role === "tool")?.content || "";
-ok(legacyArtifacts === 0 && legacyTool.length > 30000, "legacy strategy preserves previous tool-result behavior");
 
 console.log(`\nContext runtime selftest: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -7,10 +7,7 @@
  * 零 Firefox 依赖：client / router 注入，可 Node 自测。
  */
 
-import { createTurnContext, modelBudget } from "../state/TurnContext.sys.mjs";
-
-// 单条工具结果回灌进对话上下文的字符上限。超出只截头部+提示分段读，避免长会话上下文无界膨胀→TTFT 超时。
-const TOOL_RESULT_CAP = 6000;
+import { createUnifiedTurnContext } from "../state/UnifiedTurnContext.sys.mjs";
 
 // 模型连续返回"纯文字、不调工具"的最多自动续跑次数。超过就当它真的停了（防纯文字死循环空转）。
 const MAX_AUTO_CONTINUE = 3;
@@ -284,7 +281,6 @@ export async function runAgentTurn(p) {
     autoApprove = false,
     assist = false, // AI辅助逐阶段模式：无工具的纯文字回复=正常收尾（停下报告+给方向），不当 drift 逼它继续
     vision = false, // 模型是否支持看图：true 时把截图等图像作为 user 图片消息回喂
-    contextStrategy = "legacy", // projected=小上下文+大结果折叠；legacy=旧行为，可随时回退
     journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
     cacheKey = "",
   } = p || {};
@@ -299,29 +295,9 @@ export async function runAgentTurn(p) {
     throw new Error("runAgentTurn: messages array required");
   }
 
-  // ★按当前模型上下文窗口缩放预算（强模型少压缩/少截结果 → 少空转、少重读重搜）。从 client.model 解析，
-  // 判不准落默认档（=现状，安全）。注意用局部变量、不改模块常量 → 多会话并发安全。
-  const _bud = modelBudget(client.model || (client.config && client.config.model));
-  // 单工具结果进上下文的截断上限：**随窗口缩放**（默认档 50k / 大模型 150k）。
-  // ★修复旧 bug：以前这里写死 TOOL_RESULT_CAP=6000 又砍一刀，把 modelBudget 给大模型放大的 resultCap(150k) 架空了
-  //   → 强模型实际只能看到每条结果 6KB。现在改用 _bud.resultCap，缩放真正生效。
-  const legacyResultCap = (_bud && _bud.resultCap) || TOOL_RESULT_CAP;
-  const resultCap =
-    contextStrategy === "projected"
-      ? Math.min(legacyResultCap, 12000)
-      : legacyResultCap;
-  try {
-    if (router && _bud.resultCap) {
-      // Projected mode needs the full envelope long enough to save an artifact,
-      // then AgentLoop folds it before the next model request.
-      router.maxChars =
-        contextStrategy === "projected"
-          ? Number.MAX_SAFE_INTEGER
-          : _bud.resultCap;
-    }
-  } catch {
-    /* router 无此字段也不影响 */
-  }
+  const resultCap = 12000;
+  // Save the full tool envelope before projecting a bounded model preview.
+  try { router.maxChars = Number.MAX_SAFE_INTEGER; } catch {}
 
   const emit = ev => {
     try {
@@ -338,10 +314,11 @@ export async function runAgentTurn(p) {
     .sort((a, b) =>
       String(a?.function?.name || "").localeCompare(String(b?.function?.name || ""))
     );
-  const turnContext = await createTurnContext({
+  const turnContext = await createUnifiedTurnContext({
     client, messages, systemPrompt, dynamicContext, getLedger,
-    signal, onUsage, cacheKey, onCheckpoint, onEvent: emit, budget: _bud,
-    contextStrategy, journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
+    signal, onUsage, cacheKey, onCheckpoint, onEvent: emit,
+    journal, onAppend: onContextAppend, onCommit: onContextCommit,
+    onRewrite: onContextRewrite, onValidateEvidence, onRefresh: onContextRefresh,
     toolSpecs: tools, contextWindowTokens: client.contextWindowTokens || client.config?.contextWindowTokens,
   });
   let msgs = turnContext.initialMessages;
@@ -362,11 +339,11 @@ export async function runAgentTurn(p) {
 
   async function applySteering() {
     if (signal?.aborted || typeof consumeSteering !== "function") return false;
-    if (contextStrategy === "projected") await turnContext.sync(msgs);
+    await turnContext.sync(msgs);
     const incoming = await consumeSteering();
     if (signal?.aborted || !incoming?.length) return false;
     turnContext.appendSteering(msgs, incoming);
-    if (contextStrategy === "projected") await turnContext.refresh();
+    await turnContext.refresh();
     autoContinues = 0;
     truncRetries = 0;
     return true;
@@ -375,7 +352,7 @@ export async function runAgentTurn(p) {
   for (let round = 1; round <= maxRounds; round++) {
     // 手动停止（侧边栏「停止」按钮 abort）：在轮次边界干净退出，返回已有进展。
     if (signal && signal.aborted) {
-      if (contextStrategy === "projected") await turnContext.sync(msgs);
+      await turnContext.sync(msgs);
       emit({ type: "aborted", round });
       return {
         content: "（已手动停止）",
@@ -401,7 +378,7 @@ export async function runAgentTurn(p) {
       });
     } catch (error) {
       const overflow = /context.{0,30}(length|window|limit|exceed)|token.{0,30}(limit|exceed)|maximum context|too many tokens/i.test(String(error?.message || error));
-      if (contextStrategy !== "projected" || !overflow || typeof turnContext.forceCompact !== "function") throw error;
+      if (!overflow) throw error;
       msgs = await turnContext.forceCompact(round, msgs);
       res = await client.chat(turnContext.requestMessages(msgs), {
         tools, signal, onDelta, onReasoning, cacheKey,
@@ -629,7 +606,7 @@ export async function runAgentTurn(p) {
       const envText = media ? { ok: env.ok, data: env.data, error: env.error, meta: env.meta } : env;
       // 单条工具结果进上下文的硬上限：防长会话(逆向多步、page_eval/fs_read 大输出)上下文无界增长
       // → 请求体越来越大 → 模型 TTFT 超过空闲看门狗(默认300s)一字未回 → 误报「连接超时」/撞上下文窗。
-      // 大结果只截给模型一个头部 + 可操作提示；完整内容仍在侧栏事件与落盘文件里，要细节让模型分段 fs_read。
+      // 大结果先落盘，再给模型头尾预览和路径；保存失败则保留完整结果。
       let contentStr = JSON.stringify(envText);
       let artifact = null;
       if (contentStr.length > resultCap) {
@@ -648,7 +625,7 @@ export async function runAgentTurn(p) {
         }
         // Without an artifact, keep the full result in the event log. The
         // request budget gate will stop if this group cannot fit.
-        if (contextStrategy !== "projected" || artifact?.path) {
+        if (artifact?.path) {
           const reference = artifact?.path
             ? `折叠前结果已保存到 ${artifact.path}；需要细节请用 fs_read 分段读取或 code_search 精确搜索。`
             : "未设置工作目录或保存失败；需要细节请缩小查询范围后重新获取。";
@@ -734,7 +711,7 @@ export async function runAgentTurn(p) {
   }
 
   if (signal?.aborted || hasSteering()) {
-    if (contextStrategy === "projected") await turnContext.sync(msgs);
+    await turnContext.sync(msgs);
     return {
       content: signal?.aborted ? "（已手动停止）" : "",
       rounds: maxRounds, toolCalls: allToolCalls, messages: msgs,
@@ -754,7 +731,7 @@ export async function runAgentTurn(p) {
       });
     } catch (error) {
       const overflow = /context.{0,30}(length|window|limit|exceed)|token.{0,30}(limit|exceed)|maximum context|too many tokens/i.test(String(error?.message || error));
-      if (contextStrategy !== "projected" || !overflow) throw error;
+      if (!overflow) throw error;
       msgs = await turnContext.forceCompact(maxRounds + 1, msgs);
       fin = await client.chat(turnContext.requestMessages(msgs), {
         signal, onDelta, onReasoning, cacheKey,

@@ -406,18 +406,6 @@ export class ConfigStore {
     );
   }
 
-  /** "projected" keeps full UI history but sends a bounded continuation record to the model. */
-  getContextStrategy(def = "projected") {
-    const value = this.b.getString(PREF_PREFIX + "context.strategy", def);
-    return value === "legacy" ? "legacy" : "projected";
-  }
-  setContextStrategy(value) {
-    this.b.setString(
-      PREF_PREFIX + "context.strategy",
-      value === "legacy" ? "legacy" : "projected"
-    );
-  }
-
   /** 默认工作目录（新会话继承上次用过的目录；可被每个会话各自覆盖）。 */
   getDefaultWorkspaceDir(def = "") {
     return this.b.getString(PREF_PREFIX + "workspace.default", def);

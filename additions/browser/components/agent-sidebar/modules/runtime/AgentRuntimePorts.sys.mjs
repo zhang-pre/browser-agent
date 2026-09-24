@@ -16,7 +16,6 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
 
 /**
  * @typedef {object} AgentRuntimeConfigPort
- * @property {function(): "legacy"|"projected"|string} getContextStrategy
  * @property {function(): object|null} getActiveModelProfile
  * @property {function(): string} getActiveProvider
  * @property {function(string): string} getModel
@@ -28,7 +27,6 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
  * @property {function(string, string): Promise<void>} setThreadTurnStatus
  * @property {function(string): Promise<object|null>} getThread
  * @property {function(string, object): Promise<Array>} getModelMessages
- * @property {function(string, object): Promise<void>} setContextProjection
  * @property {function(string, object): Promise<void>} appendMessage
  * @property {function(string, object): Promise<void>} addThreadUsage
  * @property {function(string): Promise<object>} getUnifiedContext
@@ -187,7 +185,6 @@ export function defineAgentRuntimePorts(input) {
 
   requireMethods(clock, "ports.clock", ["now", "setTimeout", "clearTimeout"]);
   requireMethods(config, "ports.config", [
-    "getContextStrategy",
     "getActiveModelProfile",
     "getActiveProvider",
     "getModel",
@@ -197,7 +194,10 @@ export function defineAgentRuntimePorts(input) {
     "setThreadTurnStatus",
     "getThread",
     "getModelMessages",
-    "setContextProjection",
+    "getUnifiedContext",
+    "appendContextEvents",
+    "commitUnifiedCompaction",
+    "commitUnifiedRewrite",
     "appendMessage",
     "addThreadUsage",
   ]);
@@ -227,7 +227,6 @@ export function defineAgentRuntimePorts(input) {
     clearTimeout: bound(transport, "clearTimeout"),
   });
   const normalizedConfig = Object.freeze({
-    getContextStrategy: bound(config, "getContextStrategy"),
     getActiveModelProfile: bound(config, "getActiveModelProfile"),
     getActiveProvider: bound(config, "getActiveProvider"),
     getModel: bound(config, "getModel"),
@@ -240,13 +239,12 @@ export function defineAgentRuntimePorts(input) {
     setThreadTurnStatus: bound(conversations, "setThreadTurnStatus"),
     getThread: bound(conversations, "getThread"),
     getModelMessages: bound(conversations, "getModelMessages"),
-    setContextProjection: bound(conversations, "setContextProjection"),
     appendMessage: bound(conversations, "appendMessage"),
     addThreadUsage: bound(conversations, "addThreadUsage"),
-    getUnifiedContext: conversations.getUnifiedContext ? bound(conversations, "getUnifiedContext") : null,
-    appendContextEvents: conversations.appendContextEvents ? bound(conversations, "appendContextEvents") : null,
-    commitUnifiedCompaction: conversations.commitUnifiedCompaction ? bound(conversations, "commitUnifiedCompaction") : null,
-    commitUnifiedRewrite: conversations.commitUnifiedRewrite ? bound(conversations, "commitUnifiedRewrite") : null,
+    getUnifiedContext: bound(conversations, "getUnifiedContext"),
+    appendContextEvents: bound(conversations, "appendContextEvents"),
+    commitUnifiedCompaction: bound(conversations, "commitUnifiedCompaction"),
+    commitUnifiedRewrite: bound(conversations, "commitUnifiedRewrite"),
   });
 
   return Object.freeze({

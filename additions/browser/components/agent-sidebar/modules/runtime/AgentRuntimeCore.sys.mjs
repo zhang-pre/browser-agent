@@ -95,7 +95,6 @@ export class AgentRuntimeCore {
       checkpointSeq: 0,
       usage: this.createUsage(),
       lastUsage: null,
-      contextStrategy: "projected",
       contextProjected: false,
     };
   }
@@ -109,7 +108,7 @@ export class AgentRuntimeCore {
     return state;
   }
 
-  beginRun(threadId, { usage = {}, contextStrategy = "projected" } = {}) {
+  beginRun(threadId, { usage = {} } = {}) {
     const state = this.getOrInit(threadId);
     if (state.running) {
       return null;
@@ -130,7 +129,6 @@ export class AgentRuntimeCore {
     state.checkpointSeq = 0;
     state.usage = usage;
     state.lastUsage = null;
-    state.contextStrategy = contextStrategy === "legacy" ? "legacy" : "projected";
     state.contextProjected = false;
     if (state._notifyTimer) {
       this.clearTimeout(state._notifyTimer);
@@ -221,7 +219,6 @@ export class AgentRuntimeCore {
       checkpointSeq: state.checkpointSeq || 0,
       usage: { ...state.usage },
       lastUsage: state.lastUsage ? { ...state.lastUsage } : null,
-      contextStrategy: state.contextStrategy || "projected",
       contextProjected: state.contextProjected === true,
       pendingConfirm: state.pendingConfirm
         ? { id: state.pendingConfirm.id, name: state.pendingConfirm.name, args: state.pendingConfirm.args }

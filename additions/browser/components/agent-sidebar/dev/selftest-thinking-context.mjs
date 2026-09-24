@@ -34,7 +34,7 @@ const result = await runAgentTurn({
   messages: await store.getModelMessages(thread.id),
   journal: await store.getUnifiedContext(thread.id),
   onContextAppend: events => store.appendContextEvents(thread.id, events),
-  contextStrategy: "projected", maxRounds: 4, autoApprove: true,
+  maxRounds: 4, autoApprove: true,
 });
 assert.equal(requests[1].find(m => m.role === "assistant").reasoning_content, "text reasoning");
 assert.equal(requests[2].find(m => m.tool_calls).reasoning_content, reasoning);

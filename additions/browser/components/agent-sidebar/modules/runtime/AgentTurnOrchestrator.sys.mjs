@@ -66,10 +66,8 @@ export class AgentTurnOrchestrator {
       assist = false,
     } = {}
   ) {
-    const contextStrategy = this._contextStrategy();
     const state = this.runtimeCore.beginRun(threadId, {
       usage: emptyUsage(),
-      contextStrategy,
     });
     if (!state) {
       return;
@@ -126,13 +124,6 @@ export class AgentTurnOrchestrator {
     }
   }
 
-  _contextStrategy() {
-    return this.configStore.getContextStrategy &&
-      this.configStore.getContextStrategy() === "legacy"
-      ? "legacy"
-      : "projected";
-  }
-
   _createToolContext(input) {
     const context = this.createToolContext(input);
     if (!context || typeof context !== "object") {
@@ -159,15 +150,7 @@ export class AgentTurnOrchestrator {
     context.recordUsage = (raw, info = {}) => this._recordUsage(context, raw, info);
     context.vision = this._detectVision(context.client);
     context.turnMessages = await this._loadTurnMessages(context);
-    if (context.state.contextStrategy === "projected") {
-      if (!this.conversationStore.getUnifiedContext ||
-          !this.conversationStore.appendContextEvents ||
-          !this.conversationStore.commitUnifiedCompaction ||
-          !this.conversationStore.commitUnifiedRewrite) {
-        throw new Error("projected context requires a unified conversation store");
-      }
-      context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
-    }
+    context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
   }
 
   async _consumeCancellationBoundary(context) {
@@ -234,32 +217,18 @@ export class AgentTurnOrchestrator {
       if (!thread || !Array.isArray(thread.messages) || !thread.messages.length) {
         return fallback;
       }
-      const fullMessages = thread.messages.map(message => ({
-        role: message.role,
-        content: message.content,
-        ...(message.reasoning_content !== undefined ? { reasoning_content: message.reasoning_content } : {}),
-      }));
-      if (context.state.contextStrategy !== "projected") {
-        return fullMessages;
-      }
-      const messages = await this.conversationStore.getModelMessages(
-        context.threadId,
-        { strategy: "projected" }
-      );
+      const messages = await this.conversationStore.getModelMessages(context.threadId);
       const latest = await this.conversationStore.getThread(context.threadId);
       context.state.contextProjected = !!latest?.unifiedContext?.compaction;
       return messages;
     } catch {
-      return await this._projectionFallback(context, fallback);
+      return await this._contextFallback(context, fallback);
     }
   }
 
-  async _projectionFallback(context, fallback) {
+  async _contextFallback(context, fallback) {
     try {
-      const messages = await this.conversationStore.getModelMessages(
-        context.threadId,
-        { strategy: context.state.contextStrategy }
-      );
+      const messages = await this.conversationStore.getModelMessages(context.threadId);
       const latest = await this.conversationStore.getThread(context.threadId);
       context.state.contextProjected = !!latest?.unifiedContext?.compaction;
       return messages;
@@ -274,9 +243,7 @@ export class AgentTurnOrchestrator {
     let driftStreak = 0;
 
     for (;;) {
-      if (context.state.contextStrategy === "projected") {
-        context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
-      }
+      context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
       const result = await this.runAgentTurn(
         this._buildLoopOptions(context, turnMessages)
       );
@@ -364,7 +331,6 @@ export class AgentTurnOrchestrator {
           return "";
         }
       },
-      contextStrategy: state.contextStrategy,
       journal: context.journal,
       onContextAppend: events => this.conversationStore.appendContextEvents(context.threadId, events),
       onContextCommit: (plan, summary, metadata) => this.conversationStore.commitUnifiedCompaction(context.threadId, plan, summary, metadata),
@@ -432,7 +398,7 @@ export class AgentTurnOrchestrator {
       if (context.abortController.signal.aborted) break;
       const message = { role: "user", content: item.content };
       const saved = await this.conversationStore.appendMessage(threadId, message);
-      if (state.contextStrategy === "projected" && saved?.unifiedContext?.lastId) {
+      if (saved?.unifiedContext?.lastId) {
         message._contextEventId = saved.unifiedContext.lastId;
       }
       item.status = context.abortController.signal.aborted ? "cancelled" : "applied";

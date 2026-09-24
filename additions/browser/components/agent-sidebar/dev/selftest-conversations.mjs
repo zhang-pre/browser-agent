@@ -30,19 +30,10 @@ for (let i = 0; i < 10; i++) {
     content: `${i}:` + "x".repeat(2000),
   });
 }
-await s.setContextProjection(longThread.id, {
-  version: 1,
-  summary: "已确认事实和下一步",
-  cutoff: 6,
-  sourceCount: 6,
-  createdAt: 1,
-  updatedAt: 2,
-  strategy: "projected",
-});
 const journal = await s.getUnifiedContext(longThread.id);
 const plan = planUnifiedCompaction(journal, { triggerTokens: 1, targetTokens: 1000, recentTokens: 1500 });
 await s.commitUnifiedCompaction(longThread.id, plan, "已确认事实和下一步");
-const projected = await s.getModelMessages(longThread.id, { strategy: "projected" });
+const projected = await s.getModelMessages(longThread.id);
 ok(projected.length < 10 && projected[0].content.includes("任务卡") &&
    projected[1].content.includes("已确认事实和下一步") &&
    projected.at(-1)._contextEventId === 10, "模型视图使用统一任务卡、累计状态和近期原文");
@@ -56,25 +47,6 @@ await s.addThreadUsage(longThread.id, {
   providerReported: true,
 });
 ok((await s.getThread(longThread.id)).usage.cacheReadTokens === 600, "会话累计 Usage 持久化");
-
-const beforeFailedSave = (await s.getThread(longThread.id)).contextProjection.summary;
-const originalSave = s._save.bind(s);
-s._save = async () => { throw new Error("simulated disk failure"); };
-let projectionSaveFailed = false;
-try {
-  await s.setContextProjection(longThread.id, {
-    version: 1,
-    summary: "must not leak into memory",
-    cutoff: 6,
-    sourceCount: 6,
-    createdAt: 1,
-    updatedAt: 3,
-  });
-} catch {
-  projectionSaveFailed = true;
-}
-s._save = originalSave;
-ok(projectionSaveFailed && (await s.getThread(longThread.id)).contextProjection.summary === beforeFailedSave, "投影写盘失败回滚到旧版本");
 
 await s.setThreadTurnStatus(t1.id, "cancelled");
 ok((await s.getThread(t1.id)).cancellationPending === true, "手动停止写入取消边界");
@@ -112,23 +84,24 @@ globalThis.IOUtils = {
   readJSON: async () => ({ threads: [{
     ...t1,
     unifiedContext: undefined,
+    messages: [...t1.messages, { role: "user", content: "继续" }],
     contextProjection: {
-      version: 1, summary: "旧版已验证状态", cutoff: 1, sourceCount: 1,
+      version: 1, summary: "旧版已验证状态", cutoff: 2, sourceCount: 2,
       createdAt: 1, updatedAt: 2,
     },
   }] }),
 };
 try {
   const oldStore = new ConversationStore({ memoryOnly: false, path: "projection-migration.json" });
-  const migrated = await oldStore.getModelMessages(t1.id, { strategy: "projected" });
+  const migrated = await oldStore.getModelMessages(t1.id);
   ok(migrated.some(m => m.content.includes("旧版已验证状态")) &&
-     migrated.at(-1).content === "...", "旧版持久化投影迁移到统一累计状态");
+     migrated.at(-1).content === "继续", "旧版持久化投影迁移到统一累计状态");
 } finally {
   if (savedLegacyIO === undefined) delete globalThis.IOUtils;
   else globalThis.IOUtils = savedLegacyIO;
 }
 ok(imported.workspace === null && imported.envId === null && imported.lastTurnStatus === "idle", "导入会话保持静止且不绑定本机资源");
-ok(imported.contextProjection === null && imported.usage.requests === 0, "导入不携带运行期投影和 Usage");
+ok(!("contextProjection" in imported) && imported.usage.requests === 0, "导入不携带运行期投影和 Usage");
 let badImport = false;
 try { await s.importThread('{"hello":true}'); } catch { badImport = true; }
 ok(badImport, "拒绝非 Firefox Reverse 会话 JSON");
