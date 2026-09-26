@@ -33,6 +33,7 @@ SELFTESTS=(
   selftest-usage.mjs
   selftest-prompt-cache.mjs
   selftest-conversations.mjs
+  selftest-memory-contract.mjs
   selftest-ledger-sql.mjs
   selftest-ledger-shutdown.mjs
   selftest-llm-architecture.mjs

@@ -150,6 +150,7 @@ export class AgentTurnOrchestrator {
     context.recordUsage = (raw, info = {}) => this._recordUsage(context, raw, info);
     context.vision = this._detectVision(context.client);
     context.turnMessages = await this._loadTurnMessages(context);
+    await this._syncMemory(context);
     context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
   }
 
@@ -333,8 +334,8 @@ export class AgentTurnOrchestrator {
       },
       journal: context.journal,
       onContextAppend: events => this.conversationStore.appendContextEvents(context.threadId, events),
-      onContextCommit: (plan, summary, metadata) => this.conversationStore.commitUnifiedCompaction(context.threadId, plan, summary, metadata),
-      onContextRewrite: (snapshot, summary, metadata) => this.conversationStore.commitUnifiedRewrite(context.threadId, snapshot, summary, metadata),
+      onContextCommit: (plan, summary, metadata) => this.conversationStore.commitUnifiedCompaction(context.threadId, plan, summary, { ...metadata, workspaceRoot }),
+      onContextRewrite: (snapshot, summary, metadata) => this.conversationStore.commitUnifiedRewrite(context.threadId, snapshot, summary, { ...metadata, workspaceRoot }),
       onContextRefresh: () => this.conversationStore.getUnifiedContext(context.threadId),
       onValidateEvidence: async refs => {
         if (!refs.length) return;
@@ -427,8 +428,30 @@ export class AgentTurnOrchestrator {
     });
   }
 
+  async _syncMemory(context) {
+    const journal = await this.conversationStore.getUnifiedContext(context.threadId);
+    for (const entry of journal?.memoryOutbox || []) {
+      try {
+        if (entry.workspaceRoot && entry.workspaceRoot !== context.workspaceRoot) {
+          throw new Error("memory outbox belongs to another workspace");
+        }
+        const result = await context.backends.ledger.mergeHandoff(entry.handoff, context.toolContext,
+          { threadId: context.threadId, version: entry.version });
+        if (!result?.ok) throw new Error("Ledger did not confirm memory write");
+        await this.conversationStore.markMemorySync(context.threadId, entry.version);
+      } catch (error) {
+        try { await this.conversationStore.markMemorySync(context.threadId, entry.version, error.message); } catch {}
+        this.runtimeCore.pushDelta(context.state,
+          "\n⚠ 上下文摘要已保存，记忆同步待重试（压缩版本 " + entry.version + "）。下次启动本任务或生成检查点时重试。\n");
+        this.runtimeCore.notify(context.state);
+        break; // Keep version order; avoid repeatedly hitting the same failure.
+      }
+    }
+  }
+
   async _checkpoint(context, summary) {
     const { backends, state, threadId, toolContext, workspaceRoot } = context;
+    await this._syncMemory(context);
     await this._persist(threadId, summary, state.steps, { skipContext: true });
     if (workspaceRoot) {
       try {
@@ -438,11 +461,6 @@ export class AgentTurnOrchestrator {
         );
       } catch {
         // A workspace checkpoint is helpful but not required for continuation.
-      }
-      try {
-        await backends.ledger.mergeHandoff(summary, toolContext);
-      } catch {
-        // Ledger capture is likewise best effort.
       }
     }
     this._startNextSegment(state);

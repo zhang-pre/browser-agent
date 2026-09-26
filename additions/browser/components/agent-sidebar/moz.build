@@ -54,6 +54,7 @@ EXTRA_JS_MODULES.agentsidebar.runtime += [
 EXTRA_JS_MODULES.agentsidebar.state += [
     "modules/state/ConversationMigration.sys.mjs",
     "modules/state/ConversationStore.sys.mjs",
+    "modules/state/MemoryContract.sys.mjs",
     "modules/state/UnifiedContext.sys.mjs",
     "modules/state/UnifiedTurnContext.sys.mjs",
 ]

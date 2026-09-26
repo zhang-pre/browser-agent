@@ -1,72 +1,10 @@
-/* LedgerBackend.sys.mjs — 任务/跨会话「沉淀式记忆」账本（findings ledger），**Firefox 内置 SQLite 存储**。
- *
- * 治"上下文压缩后重新发现已确认事实 / 重走已否决死路"，并提供跨会话累积 + 关键词检索（recall）。
- * 借鉴 claude-mem / mem0 的结论（结构化存储胜散文摘要），但**去掉 claude-mem 的重型 sidecar**
- * （它要 Bun+Redis+Chroma+Express:37777，是给跨项目多用户的记忆服务设计的）。这里用 **Firefox 自带的
- * SQLite**（`resource://gre/modules/Sqlite.sys.mjs`）：**进程内、零外部依赖、不要 Node/Bun/Redis/Chroma/端口**。
- *   - 存储：全局 <profile>/firefox-reverse-agent/memory.sqlite，每条带 site + workspace 标签 → 跨会话累积。
- *   - 检索：Firefox 的 SQLite 没编 FTS5（实测 no such module），本量级（百~千条）用普通表 + LIKE 即时，无需 FTS。
- *   - **自动注入按工作目录隔离**：引擎每轮 + 压缩后只把**当前工作目录(=任务)**的账本注入系统提示（没设目录才退回按站点）。
- *     目录=任务身份：新目录=干净起步、开回原目录=续任务；跨任务/站点知识不自动污染上下文，靠 recall 显式捞。
- *   - 沉淀两路：① remember 工具（发现即记，write-at-discovery）；② mergeHandoff（压缩时从交接摘要自动抽事实）。
- *   - recall 工具：跨**全部**记忆按关键词/站点/类型检索（跨任务/站点检索桥；claude-mem 的 search 的轻量版）。
- */
-
+import { MEMORY_KINDS, normalizeMemory, qualifyHandoff } from "../state/MemoryContract.sys.mjs";
+// Typed workspace memory in SQLite; ledger.md is a readable mirror.
+// Discovery writes use remember; compaction writes use structured, versioned batches.
+// Legacy mem rows are migrated as unverified records, retaining original evidence.
 const DIR = "firefox-reverse-agent";
 const DB = "memory.sqlite";
 const MD = "ledger.md";
-const CAP_FACT = 120; // 每(站点,类型)封顶，防注入块无限膨胀（跨会话累积也要有界）
-const CAP_DEAD = 60;
-
-// 作用域列只能来自这两个内部枚举。保留完整 SQL，而不是把列名拼入模板字符串：
-// 即使以后调用方误传外部值，也会在执行 SQL 前 fail-closed。
-const SCOPE_SQL = new Map([
-  [
-    "workspace",
-    Object.freeze({
-      selectExisting:
-        "SELECT id,norm FROM mem WHERE kind=:k AND workspace<>'' AND workspace=:v",
-      trimOldest:
-        "DELETE FROM mem WHERE id IN (SELECT id FROM mem WHERE kind=:k AND workspace=:v ORDER BY id DESC LIMIT -1 OFFSET :cap)",
-    }),
-  ],
-  [
-    "site",
-    Object.freeze({
-      selectExisting:
-        "SELECT id,norm FROM mem WHERE kind=:k AND site<>'' AND site=:v",
-      trimOldest:
-        "DELETE FROM mem WHERE id IN (SELECT id FROM mem WHERE kind=:k AND site=:v ORDER BY id DESC LIMIT -1 OFFSET :cap)",
-    }),
-  ],
-]);
-/** 返回固定作用域 SQL；未知列拒绝，禁止回退到字符串拼接。 */
-export function ledgerScopeSql(column) {
-  const statements = SCOPE_SQL.get(column);
-  if (!statements) {
-    throw new Error(`不支持的账本作用域列: ${String(column)}`);
-  }
-  return statements;
-}
-
-/** 仅按内部查询结果数量生成占位符；ID 值始终通过绑定参数传入。 */
-export function ledgerDeleteByIdsSql(count) {
-  if (!Number.isSafeInteger(count) || count < 1) {
-    throw new Error(`无效的账本去重数量: ${String(count)}`);
-  }
-  return "DELETE FROM mem WHERE id IN (" + Array(count).fill("?").join(",") + ")";
-}
-
-function _norm(s) {
-  return String(s || "")
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[，。、；：,.;:!?！？()（）"'`*\-_]/g, "");
-}
-function _similarSql() {
-  // dedup 用归一化全等（norm 列）；近重复（子串）在 append 里额外做一次内存判定。
-  return true;
-}
 
 function agentWin(ctx) {
   try { const w = ctx && ctx.win; if (w && w.gBrowser && !w.closed) return w; } catch {}
@@ -148,6 +86,12 @@ export class LedgerBackend {
         await conn.execute("CREATE INDEX IF NOT EXISTS i_site ON mem(site)");
         await conn.execute("CREATE INDEX IF NOT EXISTS i_ws ON mem(workspace)");
         await conn.execute("CREATE INDEX IF NOT EXISTS i_norm ON mem(norm)");
+        await conn.execute("CREATE TABLE IF NOT EXISTS memory_v2(id INTEGER PRIMARY KEY AUTOINCREMENT, memory_key TEXT UNIQUE, site TEXT, workspace TEXT, kind TEXT, status TEXT, text TEXT, ev TEXT, ts TEXT, norm TEXT, payload TEXT)");
+        await conn.execute("CREATE INDEX IF NOT EXISTS memory_v2_ws ON memory_v2(workspace)");
+        await conn.execute("CREATE TABLE IF NOT EXISTS memory_batches(batch_key TEXT PRIMARY KEY)");
+        // Old entries carry no verification contract. Keep their text/evidence,
+        // but do not silently promote them to verified facts under the new schema.
+        await conn.execute("INSERT OR IGNORE INTO memory_v2(memory_key,site,workspace,kind,status,text,ev,ts,norm,payload) SELECT 'legacy:'||id,site,workspace,CASE WHEN kind='deadend' THEN 'deadend' ELSE 'observation' END,'unverified',text,ev,ts,norm,'{}' FROM mem");
         if (this._closing) {
           throw new Error("LedgerBackend is shutting down");
         }
@@ -172,17 +116,6 @@ export class LedgerBackend {
     }
   }
 
-  _wsRoot(ctx) {
-    try {
-      if (ctx && ctx.workspaceRoot) {
-        return ctx.workspaceRoot;
-      }
-      return (this._workspace && this._workspace.getRoot && this._workspace.getRoot()) || "";
-    } catch {
-      return "";
-    }
-  }
-
   /** 当前标签页主域（站点 key），取不到返回 ""。与 NotesBackend 同款。 */
   currentSite(ctx) {
     try {
@@ -199,279 +132,118 @@ export class LedgerBackend {
     }
   }
 
-  /** 当前任务作用域（**按工作目录隔离**：有目录→按目录；没目录→退回按站点，纯浏览时不至于全空）。
-   *  目录 = 任务身份：新目录=干净起步、开回原目录=续任务；跨任务/站点检索走 recall。col 取自固定字符串，无注入风险。 */
-  _scope(ctx) {
-    // **只认会话自己绑定的目录**（ctx.workspaceRoot），**绝不退回全局 this._root**——那是跨会话共享的可变单例，
-    // 上个会话设过的目录会被这个会话读到 → 串会话（用户实测：新会话还注入旧站点账本的真因）。
-    const ws = (ctx && ctx.workspaceRoot) || "";
-    if (ws) {
-      return { col: "workspace", val: ws };
-    }
-    const site = this.currentSite(ctx);
-    if (site) {
-      return { col: "site", val: site };
-    }
-    return null;
-  }
-
-  /** 当前任务（**会话绑定的工作目录**）下的全部账本行，按 id 升序。用于**自动注入** + 渲染 ledger.md。
-   *  关键：digest 自动注入**只认 ctx.workspaceRoot**——不退回全局 _root、不退回站点 → 没绑目录就干净（不串会话/不按站点灌）。 */
   async _contextRows(ctx) {
+    const ws = ctx?.workspaceRoot || "";
+    if (!ws) return [];
     const db = await this._db();
-    const ws = (ctx && ctx.workspaceRoot) || "";
-    if (!ws) {
-      return [];
-    }
-    const rows = await db.execute(
-      "SELECT kind,text,ev FROM mem WHERE workspace<>'' AND workspace=:v ORDER BY id",
-      { v: ws }
-    );
-    return rows.map(r => ({
-      kind: r.getResultByName("kind"),
-      text: r.getResultByName("text"),
-      ev: r.getResultByName("ev"),
-    }));
+    const rows = await db.execute("SELECT memory_key,kind,status,text,ev,payload,site,ts FROM memory_v2 WHERE workspace=:ws ORDER BY id DESC", { ws });
+    const all = rows.map(r => this._row(r));
+    const superseded = new Set(all.flatMap(x => x.supersedes || []));
+    return all.map(x => superseded.has(x.id) ? { ...x, status: "superseded" } : x);
   }
 
-  /** 渲染人类可读 ledger.md 到**会话绑定的工作目录**（用户能直接打开看记忆沉淀）。只认 ctx.workspaceRoot：
-   *  无目录就不写（避免拿全局 _root 把别的目录的 ledger.md 覆盖成空）。 */
+  _row(r) {
+    let payload = {};
+    try { payload = JSON.parse(r.getResultByName("payload") || "{}"); } catch {}
+    return { ...payload, id: r.getResultByName("memory_key"), kind: r.getResultByName("kind"),
+      site: r.getResultByName("site"), timestamp: r.getResultByName("ts"),
+      status: r.getResultByName("status"), text: r.getResultByName("text"), evidence: r.getResultByName("ev") };
+  }
+
+  _format(rows) {
+    const labels = { fact: "事实", hypothesis: "假设", deadend: "失败路径", decision: "决策", artifact: "产物", observation: "观察" };
+    return MEMORY_KINDS.map(kind => {
+      const items = rows.filter(x => x.kind === kind);
+      if (!items.length) return "";
+      return "## " + labels[kind] + "\n" + items.map(x =>
+        "- [" + x.status + "] " + x.text +
+        (x.conditions ? "；适用条件：" + x.conditions : "") +
+        (x.evidence ? "；证据：" + x.evidence : "") +
+        (x.evidenceRefs?.length ? "；日志：" + x.evidenceRefs.map(e => e.threadId + "#" + e.eventId).join(", ") : "") +
+        (x.artifact ? "；产物：" + JSON.stringify(x.artifact) : "") +
+        "；记忆 ID：" + x.id
+      ).join("\n");
+    }).filter(Boolean).join("\n\n");
+  }
+
   async _renderMd(ctx) {
-    const ws = (ctx && ctx.workspaceRoot) || "";
-    if (!ws) {
-      return;
-    }
-    let rows = [];
-    try {
-      rows = await this._contextRows(ctx);
-    } catch {
-      return;
-    }
-    const facts = rows.filter(x => x.kind !== "deadend");
-    const dead = rows.filter(x => x.kind === "deadend");
-    const fmt = x => `- ${x.text}${x.ev ? `  〔证据:${x.ev}〕` : ""}`;
-    const body =
-      `# 逆向账本（findings ledger · SQLite 持久化 · 跨会话累积 · 每轮注入上下文）\n\n` +
-      `## ✅ 已确认事实（${facts.length}）\n` +
-      (facts.map(fmt).join("\n") || "（暂无）") +
-      `\n\n## ⛔ 已否决 · 别重试（${dead.length}）\n` +
-      (dead.map(fmt).join("\n") || "（暂无）") +
-      `\n`;
-    try {
-      await IOUtils.writeUTF8(PathUtils.join(ws, MD), body);
-    } catch {
-      /* MD 是镜像，写失败不影响主存 */
-    }
+    if (!ctx?.workspaceRoot) return;
+    const body = "# 任务记忆（SQLite）\n\n" + this._format(await this._contextRows(ctx)) + "\n";
+    try { await IOUtils.writeUTF8(PathUtils.join(ctx.workspaceRoot, MD), body); } catch {}
   }
 
-  /** 内部：并入若干条（去重 + 每(站点,类型)封顶 + 渲染镜像）。返回 {added, dedup}。 */
-  async _addMany(items, ctx) {
-    const db = await this._db();
+  async _addMany(items, ctx, db = null, batchKey = "") {
+    const normalized = items.map(normalizeMemory); // Validate the whole batch before writes.
+    db ||= await this._db();
+    const ws = ctx?.workspaceRoot || "";
     const site = this.currentSite(ctx);
-    const ws = (ctx && ctx.workspaceRoot) || "";   // 只记会话绑定目录（不退回全局 _root，避免把别的会话目录写进标签）
-    const sc = this._scope(ctx);   // 任务作用域（会话目录优先、站点兜底）→ dedup/cap 都按这个隔离
-    const ts = new Date().toISOString().slice(0, 10);
-    let added = 0;
-    let dedup = 0;
-    for (const it of items) {
-      const t = String(it.text || "").trim();
-      if (!t) {
-        continue;
+    let added = 0, dedup = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const item = normalized[i];
+      for (const id of item.supersedes) {
+        const found = await db.execute("SELECT memory_key FROM memory_v2 WHERE memory_key=:id AND workspace=:ws", { id, ws });
+        if (!found.length) throw new Error("supersedes references missing memory in this workspace");
       }
-      const kind = it.kind === "deadend" ? "deadend" : "fact";
-      const text = t.slice(0, 500);
-      const ev = String(it.evidence || it.ev || "").trim().slice(0, 300);
-      const norm = _norm(text);
-      // 去重：同任务作用域(目录/站点) + 同 kind 下，归一化全等 或 子串近重复 → 删旧留新。
-      const scopeSql = sc ? ledgerScopeSql(sc.col) : null;
-      const existing = scopeSql
-        ? await db.execute(scopeSql.selectExisting, { k: kind, v: sc.val })
-        : [];
-      const dropIds = [];
-      for (const r of existing) {
-        const en = r.getResultByName("norm") || "";
-        if (!en) {
-          continue;
-        }
-        const [a, b] = norm.length <= en.length ? [norm, en] : [en, norm];
-        if (norm === en || (a.length >= 12 && b.includes(a))) {
-          dropIds.push(r.getResultByName("id"));
-        }
-      }
-      if (dropIds.length) {
-        // SQL 只按可信数量生成问号；全部 ID 一次绑定，保留原有单语句原子性。
-        await db.execute(ledgerDeleteByIdsSql(dropIds.length), dropIds);
-        dedup += dropIds.length;
-      }
-      await db.execute(
-        "INSERT INTO mem(site,workspace,kind,text,ev,ts,norm) VALUES(:s,:w,:k,:t,:e,:ts,:n)",
-        { s: site, w: ws, k: kind, t: text, e: ev, ts, n: norm }
-      );
-      if (!dropIds.length) {
-        added++;
-      }
-      // 每(任务作用域,类型)封顶：删最旧超出部分。
-      if (scopeSql) {
-        const cap = kind === "deadend" ? CAP_DEAD : CAP_FACT;
-        await db.execute(
-          scopeSql.trimOldest,
-          { k: kind, v: sc.val, cap }
-        );
-      }
+      // Include evidence, status, conditions and artifact version in identity.
+      // Never delete a hypothesis or a conflicting experiment by substring match.
+      const norm = JSON.stringify(item);
+      const existing = await db.execute("SELECT memory_key FROM memory_v2 WHERE workspace=:ws AND site=:site AND norm=:norm", { ws, site, norm });
+      if (existing.length) { dedup++; continue; }
+      const key = batchKey ? batchKey + ":" + i : globalThis.crypto.randomUUID();
+      await db.execute("INSERT INTO memory_v2(memory_key,site,workspace,kind,status,text,ev,ts,norm,payload) VALUES(:key,:site,:ws,:kind,:status,:text,:ev,:ts,:norm,:payload)", {
+        key, site, ws, kind: item.kind, status: item.status, text: item.text, ev: item.evidence,
+        ts: new Date().toISOString(), norm, payload: norm,
+      });
+      added++;
     }
-    await this._renderMd(ctx);
     return { added, dedup };
   }
 
-  async _counts(ctx) {
-    const rows = await this._contextRows(ctx);
-    return { facts: rows.filter(x => x.kind !== "deadend").length, deadends: rows.filter(x => x.kind === "deadend").length };
-  }
-
-  /**
-   * 追加一条账本（**发现即记**）。确认一个事实/排除一条路就立刻调，别等压缩。
-   * @param {object} p { text(必填), kind?("fact"|"deadend"), evidence? }
-   */
-  async append({ text, kind, evidence, ev } = {}, ctx) {
-    if (!text || !String(text).trim()) {
-      throw new Error("text 必填（一句话写清这条已确认的事实，或要排除的死路+理由）。");
-    }
-    const k = kind === "deadend" ? "deadend" : "fact";
-    const r = await this._addMany([{ text, kind: k, evidence: evidence || ev }], ctx);
-    const counts = await this._counts(ctx);
-    return {
-      ok: true,
-      kind: k,
-      counts,
-      ...(r.dedup ? { dedupedOld: r.dedup } : {}),
-      note:
-        `已记入记忆库（${k === "deadend" ? "已否决·别重试" : "已确认事实"}）${r.dedup ? `，去重 ${r.dedup} 条旧的` : ""}。` +
-        `本任务(工作目录)现有 ✅${counts.facts} / ⛔${counts.deadends}。**本目录的账本每轮注入你上下文顶部**——动手前先看：确认过的别重发现/重抓，否决的别重走。换目录=新任务从干净起步；要续旧任务就开回那个任务的目录(账本 + recall 都随目录回来)。`,
-    };
-  }
-
-  /** 整本格式化成注入块（引擎每轮 + 压缩后注入系统提示）。当前站点/任务无记忆 → ""。 */
-  async digest({ maxChars = 6000 } = {}, ctx) {
-    let rows = [];
-    try {
-      rows = await this._contextRows(ctx);
-    } catch {
-      return "";
-    }
-    if (!rows.length) {
-      return "";
-    }
-    const facts = rows.filter(x => x.kind !== "deadend");
-    const dead = rows.filter(x => x.kind === "deadend");
-    const fmt = x => `- ${x.text}${x.ev ? `〔${x.ev}〕` : ""}`;
-    let body =
-      `【本任务记忆 · 你在**这个工作目录**沉淀的"已确认事实 / 已否决死路"（SQLite 跨会话保留、**按工作目录隔离**）——这是你的记忆。动手前先看这里：` +
-      `已确认的**别重新发现/重抓/重解码**，已否决的**别重走**；要细节去工作目录文件 fs_read，要按关键词查本目录记忆用 recall。】`;
-    if (facts.length) {
-      body += `\n\n✅ 已确认（${facts.length}）：\n` + facts.map(fmt).join("\n");
-    }
-    if (dead.length) {
-      body += `\n\n⛔ 已否决·别重试（${dead.length}）：\n` + dead.map(fmt).join("\n");
-    }
-    if (body.length > maxChars) {
-      body = body.slice(0, maxChars) + "\n…（账本过长已截断，全文见工作目录 ledger.md，或用 recall 检索）";
-    }
-    return body;
-  }
-
-  /**
-   * 检索**当前工作目录(任务)**的记忆，按关键词/类型查。
-   * ★记忆严格按目录隔离：**只查本目录、不跨站点、不从全局捞**——换目录=干净起步、开回原目录=续任务。
-   * （没绑目录 → 无记忆可查；想跨任务复用就开回那个任务的目录。）
-   * @param {object} p { query?, kind?, limit? }
-   */
-  async recall({ query, kind, limit = 20 } = {}, ctx) {
+  async append({ text, kind = "hypothesis", status = "unverified", evidence = "", ev, evidenceRefs = [], conditions, artifact, supersedes } = {}, ctx) {
+    if (!ctx?.workspaceRoot) throw new Error("remember requires a bound workspace");
+    const item = normalizeMemory({ text, kind, status, evidence: evidence || ev, evidenceRefs, conditions, artifact, supersedes });
     const db = await this._db();
-    const ws = (ctx && ctx.workspaceRoot) || "";
-    if (!ws) {
-      return {
-        ok: true,
-        count: 0,
-        results: [],
-        note: "未绑定工作目录 → 没有可检索的记忆（记忆按目录隔离）。先「打开目录」；想续旧任务就开回那个任务的目录。",
-      };
-    }
-    let sql = "SELECT site,kind,text,ev,ts FROM mem WHERE workspace=:ws";
-    const p = { ws };
-    if (query && String(query).trim()) {
-      sql += " AND text LIKE :q";
-      p.q = "%" + String(query).trim() + "%";
-    }
-    if (kind === "fact" || kind === "deadend") {
-      sql += " AND kind=:k";
-      p.k = kind;
-    }
-    sql += " ORDER BY id DESC LIMIT :lim";
-    p.lim = Math.max(1, Math.min(100, limit | 0 || 20));
-    let rows = [];
-    try {
-      rows = await db.execute(sql, p);
-    } catch (e) {
-      return { ok: false, error: String((e && e.message) || e) };
-    }
-    const results = rows.map(r => ({
-      site: r.getResultByName("site"),
-      kind: r.getResultByName("kind"),
-      text: r.getResultByName("text"),
-      ev: r.getResultByName("ev"),
-      ts: r.getResultByName("ts"),
-    }));
-    return {
-      ok: true,
-      count: results.length,
-      results,
-      note: results.length
-        ? "命中**本工作目录(任务)**的历史记忆（本目录的记忆每轮也已自动注入上下文）。⚠ 站点会改版，历史结论用前先验证仍适用、产物按需重新落盘。"
-        : "本目录没有匹配项（新任务/新方向，或还没 remember 沉淀过）。",
-    };
+    const result = await db.executeTransaction(() => this._addMany([item], ctx, db));
+    await this._renderMd(ctx);
+    return { ok: true, ...result, kind: item.kind, status: item.status,
+      note: "已保存；verified 为显式验证声明，证据仍需核查。假设与失败条件不会自动升级为事实或永久禁令。" };
   }
 
-  /**
-   * 压缩时的**自动捕获安全网**：从 LLM 交接摘要里抽"已确认事实/已否决假设"两节的 bullet，并入记忆库（去重）。
-   * 即便 Agent 没主动 remember，每次压缩也把确认结论沉淀进库——把"压缩能力"沉淀下来不衰减。
-   */
-  async mergeHandoff(handoffText, ctx) {
-    const text = String(handoffText || "");
-    if (!text) {
-      return { ok: false };
-    }
-    let sec = null;
-    const items = [];
-    for (const ln of text.split("\n")) {
-      const h = ln.match(/^\s*#{1,4}\s*(.+?)\s*$/);
-      if (h) {
-        const t = h[1];
-        sec = /已确认|确认事实/.test(t)
-          ? "fact"
-          : /已否决|否决假设|别重试|死路|永不重试/.test(t)
-            ? "deadend"
-            : null;
-        continue;
-      }
-      const b = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
-      if (b && sec) {
-        const t = b[1].trim();
-        if (t.length >= 4) {
-          items.push({ kind: sec, text: t });
-        }
-      }
-      if (items.length >= 40) {
-        break;
-      }
-    }
-    if (!items.length) {
-      return { ok: true, added: 0 };
-    }
-    try {
-      const r = await this._addMany(items, ctx);
-      return { ok: true, added: r.added, dedup: r.dedup };
-    } catch {
-      return { ok: false };
-    }
+  async digest({ maxChars = 6000 } = {}, ctx) {
+    let rows;
+    try { rows = await this._contextRows(ctx); } catch { return ""; }
+    if (!rows.length) return "";
+    const header = "【本任务记忆】按类型和状态阅读：unverified 不是事实；superseded 仅供追溯。失败路径只在所列条件下适用；环境变化或证据冲突时重新验证。用户有效目标以任务卡为准。\n";
+    const body = header + this._format(rows);
+    return body.slice(0, maxChars) +
+      (body.length > maxChars ? "\n…全文见 ledger.md 或 recall。" : "");
+  }
+
+  async recall({ query, kind, limit = 20 } = {}, ctx) {
+    if (kind && !MEMORY_KINDS.includes(kind)) throw new Error("unknown memory kind");
+    const rows = await this._contextRows(ctx);
+    const results = rows.filter(x => (!kind || x.kind === kind) &&
+      (!query || (x.text + " " + x.evidence).toLowerCase().includes(String(query).toLowerCase())))
+      .slice(0, Math.max(1, Math.min(100, Number(limit) || 20)));
+    return { ok: true, count: results.length, results };
+  }
+
+  // Structured input only. Batch receipt and all entries commit together.
+  async mergeHandoff(handoff, ctx, { threadId, version } = {}) {
+    if (!handoff || handoff.schemaVersion !== 1 || !Array.isArray(handoff.memories) ||
+        !threadId || !Number.isSafeInteger(version) || version < 1) throw new Error("invalid structured memory handoff");
+    if (!ctx?.workspaceRoot) throw new Error("memory sync requires workspace");
+    const items = qualifyHandoff(handoff, threadId);
+    const batchKey = threadId + ":" + version;
+    const db = await this._db();
+    const result = await db.executeTransaction(async () => {
+      const seen = await db.execute("SELECT batch_key FROM memory_batches WHERE batch_key=:key", { key: batchKey });
+      if (seen.length) return { ok: true, added: 0, alreadyApplied: true };
+      const result = await this._addMany(items, ctx, db, batchKey);
+      await db.execute("INSERT INTO memory_batches(batch_key) VALUES(:key)", { key: batchKey });
+      return { ok: true, ...result };
+    });
+    await this._renderMd(ctx);
+    return result;
   }
 }

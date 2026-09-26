@@ -33,3 +33,20 @@
   `bash scripts/sync-additions.sh` 同步到 Firefox 源码树并构建。
 - 项目根目录运行 `bash scripts/selftest-agent-tools.sh`，覆盖 Runtime 逻辑、
   模块清单及安装后导入链。
+
+## 压缩与记忆交接
+
+- `state/MemoryContract.sys.mjs` 是摘要和 Ledger 共用的结构化契约。摘要模型输出 JSON：
+  `schemaVersion / summary / nextAction / facts / hypotheses / deadends / decisions / artifacts / observations`。
+  每项包含 `text / status / evidenceIds`；不再解析 Markdown 标题。
+- `fact` 必须显式 `verified` 且有证据；`deadend` 还必须有适用条件。
+  产物包含路径及 hash/version。结构校验、日志覆盖校验不能证明结论真实。
+- 日志证据入库后用 `threadId + eventId` 定位；外置工具结果的路径和版本从日志提取。
+  改变结论通过 `supersedes` 关联旧记忆，旧证据仍保留。
+- 压缩状态与 `unifiedContext.memoryOutbox` 在同一次会话保存中提交；
+  SQLite 用事务和 `threadId:version` 回执保证重试不重复。失败保留待同步项并提示，
+  下次启动本任务或生成检查点时重试；禁止改写到其他工作目录。
+- 主库：profile 下 `firefox-reverse-agent/memory.sqlite` 的 `memory_v2` 和
+  `memory_batches`；工作目录的 `ledger.md` 为可读镜像。
+  旧 `mem` 表保留，历史事实迁移为未验证观察，历史失败路径也标为未验证。
+  本次升级不会从旧 Markdown 摘要回填“已验证”记忆。

@@ -1,3 +1,4 @@
+import { handoffJson } from "./handoff-fixture.mjs";
 import assert from "node:assert/strict";
 import { ConversationStore } from "../modules/state/ConversationStore.sys.mjs";
 import { createUnifiedTurnContext } from "../modules/state/UnifiedTurnContext.sys.mjs";
@@ -19,7 +20,7 @@ const client = {
     const early = input.includes("FACT_EARLY") ? "FACT_EARLY 来自实验 #2；" : "";
     const conflict = input.includes("CONFLICT_A") || input.includes("CONFLICT_B")
       ? "CONFLICT_A 与 CONFLICT_B 环境不同，待验证；" : "";
-    return { content: early + conflict + "当前阶段：验证浏览器调用；下一步：比对签名。", usage: null };
+    return { content: handoffJson(early + conflict + "当前阶段：验证浏览器调用；下一步：比对签名。"), usage: null };
   },
 };
 const ctx = await createUnifiedTurnContext({
@@ -125,17 +126,25 @@ const rewriteBefore = await store.getUnifiedContext(rewriteThread.id);
 const rewritePlan = planUnifiedCompaction(rewriteBefore, { triggerTokens: 1, targetTokens: 1, recentTokens: 1 });
 await store.commitUnifiedCompaction(rewriteThread.id, rewritePlan, "state ".repeat(1200));
 const oldRewrite = await store.getUnifiedContext(rewriteThread.id);
-let rewriteCalls = 0;
+let rewriteCalls = 0, rewriteCheckpoints = 0;
+let liveLedger = "before memory";
 const rewriting = await createUnifiedTurnContext({
-  client: { model: "test", async chat() { rewriteCalls++; return { content: "short state with experiment evidence" }; } },
+  client: { model: "test", async chat() { rewriteCalls++; return { content: handoffJson("short state with experiment evidence") }; } },
   messages: await store.getModelMessages(rewriteThread.id),
   journal: oldRewrite,
+  getLedger: async () => liveLedger,
+  onCheckpoint: async () => { rewriteCheckpoints++; liveLedger = "fresh memory after rewrite"; },
   contextWindowTokens: 8192,
   onRewrite: (snapshot, summary, meta) => store.commitUnifiedRewrite(rewriteThread.id, snapshot, summary, meta),
 });
-await rewriting.forceCompact(1, rewriting.initialMessages);
+const rewrittenView = await rewriting.forceCompact(1, rewriting.initialMessages);
 const rewriteAfter = await store.getUnifiedContext(rewriteThread.id);
 assert.equal(rewriteCalls, 1);
+assert.equal(rewriteCheckpoints, 1);
+assert.match(JSON.stringify(rewrittenView), /fresh memory after rewrite/);
+assert.equal(rewriteAfter.memoryOutbox.length, 1);
+liveLedger = "new direct remember entry";
+assert.match(JSON.stringify(await rewriting.compact(2, rewrittenView)), /new direct remember entry/);
 assert.equal(rewriteAfter.compaction.version, oldRewrite.compaction.version + 1);
 assert.equal(rewriteAfter.compaction.coveredThrough, oldRewrite.compaction.coveredThrough);
 assert.match(rewriteAfter.compaction.summary, /short state/);
@@ -154,7 +163,7 @@ await runAgentTurn({
   client: {
     model: "test", contextWindowTokens: 8192,
     async chat(messages, opts) {
-      if (!opts.tools) return { content: "verified state", toolCalls: [] };
+      if (!opts.tools) return { content: handoffJson("verified state"), toolCalls: [] };
       mainCalls++;
       mainSizes.push(JSON.stringify(messages).length);
       if (mainCalls === 1) throw new Error("maximum context length exceeded");
@@ -175,7 +184,7 @@ await assert.rejects(runAgentTurn({
   client: {
     model: "test", contextWindowTokens: 8192,
     async chat(_messages, opts) {
-      if (!opts.tools) return { content: "summary", toolCalls: [] };
+      if (!opts.tools) return { content: handoffJson("summary"), toolCalls: [] };
       noArtifactCalls++;
       return noArtifactCalls === 1
         ? { content: "", toolCalls: [{ id: "big", type: "function", function: { name: "probe", arguments: "{}" } }] }
@@ -207,7 +216,7 @@ await runAgentTurn({
   client: {
     model: "test",
     async chat(messages, opts) {
-      if (!opts.tools) return { content: "summary" };
+      if (!opts.tools) return { content: handoffJson("summary") };
       steerRequests.push(messages);
       return steerRequests.length === 1
         ? { content: "", toolCalls: [
@@ -263,7 +272,7 @@ const emptyRetry = await createUnifiedTurnContext({
     retryBudgets.push(opts.maxTokens);
     return retryBudgets.length === 1
       ? { content: "", reasoningContent: "private reasoning", finishReason: "length" }
-      : { content: "verified summary", finishReason: "stop" };
+      : { content: handoffJson("verified summary"), finishReason: "stop" };
   } },
   contextWindowTokens: 8192, reserveOutputTokens: 1024,
 });
@@ -323,7 +332,7 @@ const emptyRewrite = await createUnifiedTurnContext({
   client: { async chat() {
     emptyRewriteCalls++;
     return emptyRewriteCalls === 1 ? { content: "", finishReason: "length" }
-      : { content: "short rewritten state", finishReason: "stop" };
+      : { content: handoffJson("short rewritten state"), finishReason: "stop" };
   } },
   contextWindowTokens: 8192,
 });
@@ -370,7 +379,7 @@ assert.equal(resolveContextWindowTokens("deepseek-v5-unknown"), 128000);
 config.updateModelProfile(profile.id, { contextWindowTokens: null });
 const largeClient = buildClientFromStore(config);
 let largeCalls = 0;
-largeClient.chat = async () => { largeCalls++; return { content: "summary" }; };
+largeClient.chat = async () => { largeCalls++; return { content: handoffJson("summary") }; };
 const largeContext = await createUnifiedTurnContext({
   client: largeClient,
   messages: [{ role: "user", content: "task" },
@@ -385,7 +394,7 @@ const { messagesTokens, estimateTokens } = await import("../modules/state/Unifie
 let budgetCalls = 0;
 const budgetToolSpecs = [{ type: "function", function: { name: "probe", description: "x".repeat(2100) } }];
 const budgetCtx = await createUnifiedTurnContext({
-  client: { async chat() { budgetCalls++; return { content: "verified concise state" }; } },
+  client: { async chat() { budgetCalls++; return { content: handoffJson("verified concise state") }; } },
   contextWindowTokens: 10000, reserveOutputTokens: 1000,
   systemPrompt: "s".repeat(1500), dynamicContext: "d".repeat(300),
   toolSpecs: budgetToolSpecs,

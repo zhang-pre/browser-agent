@@ -1,3 +1,4 @@
+import { parseHandoff, mergeHandoffs } from "./MemoryContract.sys.mjs";
 import { resolveContextWindowTokens } from "../llm/LlmClient.sys.mjs";
 // UnifiedTurnContext.sys.mjs — one budget and one compaction path across user turns.
 import {
@@ -10,7 +11,9 @@ const START = "⟪FRX_RUNTIME_CONTEXT_START⟫";
 const END = "⟪FRX_RUNTIME_CONTEXT_END⟫";
 const SUMMARY_PROMPT = `维护 Web 逆向任务的累计执行状态。输出结构化交接记录，保留目标的引用、已验证事实及证据 ID、待验证假设、相互矛盾的实验及各自环境、失败实验的适用条件、产物路径/版本、当前阶段和下一步。
 你只能更新执行状态，不得修改任务卡中的有效目标。未知结论不得升级为已验证；矛盾实验标记待验证。精确签名/密文/请求体引用原始产物，不重新抄写。
-本次输入按日志 ID 顺序排列。只输出新的累计状态。`;
+本次输入按日志 ID 顺序排列。只输出一个 JSON 对象，不加 Markdown 围栏：
+{"schemaVersion":1,"summary":"累计状态（含矛盾、环境差异、当前阶段）","facts":[],"hypotheses":[],"deadends":[],"decisions":[],"artifacts":[],"observations":[],"nextAction":"下一步"}
+每个数组项必须有 text、status、evidenceIds（整数日志 ID 数组）。facts 仅可放有实验证据的 verified 结论；hypotheses 默认 unverified；deadends 必须 verified 且填写 conditions（失败实验的适用条件），单次失败不得概括为永不重试。artifact 项额外填写 artifact:{path,version或hash}。其他类型按实际状态填写。未知、矛盾或只有失败证据的结论留在 hypotheses/observations；严禁为了满足格式升级为 verified。summary 必须包含下一步。只引用输入中的证据 ID。`;
 const number = (value, fallback) => Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 
 function stripRuntime(content) {
@@ -126,7 +129,7 @@ export async function createUnifiedTurnContext({
   const retryOutput = Math.min(16384, Math.floor(windowTokens * 0.4));
   const summarySafety = Math.max(1024, Math.floor(windowTokens * 0.04));
   let retryAfterRound = 0;
-  async function summaryText(content, firstOutput, phase) {
+  async function summaryText(content, firstOutput, phase, coveredThrough) {
     const request = [
       { role: "system", content: SUMMARY_PROMPT },
       { role: "user", content },
@@ -144,16 +147,20 @@ export async function createUnifiedTurnContext({
       try { onUsage?.(res?.usage, { phase: "handoff" }); } catch {}
       const text = typeof res?.content === "string" ? res.content.trim() : "";
       const truncated = ["length", "max_tokens"].includes(res?.finishReason);
-      if (text && !truncated) return text;
+      let validation = "";
+      if (text && !truncated) {
+        try { return parseHandoff(text, state.events, coveredThrough); }
+        catch (error) { validation = error.message; }
+      }
       // Metadata only: reasoning is not a factual summary and must never be
       // substituted for missing content or exposed in diagnostic events.
       detail = "finishReason=" + (res?.finishReason || "unknown") +
         ", contentChars=" + text.length +
         ", reasoningChars=" + String(res?.reasoningContent || "").length +
-        ", maxTokens=" + maxTokens;
+        ", maxTokens=" + maxTokens + (validation ? ", validation=" + validation : "");
       emit({ type: "context_summary_retry", phase, attempt: attempt + 1, detail });
     }
-    const error = new Error("上下文压缩失败：模型连续两次未返回完整摘要；原始记录和旧摘要已保留。" +
+    const error = new Error("上下文压缩失败：模型连续两次未返回符合结构契约的完整摘要；原始记录和旧摘要已保留。" +
       " (" + phase + ": " + detail + ")");
     error.code = "CONTEXT_SUMMARY_INCOMPLETE";
     throw error;
@@ -166,27 +173,31 @@ export async function createUnifiedTurnContext({
     const maxSource = Math.max(256, Math.min(32000,
       summaryInput - estimateTokens(SUMMARY_PROMPT) - estimateTokens(task) - summaryOutput - 512));
     const chunks = sourceChunks(plan.evicted, maxSource);
+    let handoff = null;
     let summary = plan.previousSummary;
     for (const chunk of chunks) {
       const content = `任务卡（只读）：\n${task}\n\n上一版累计状态：\n${summary || "（无）"}\n\n本次新增日志：\n${eventSource(chunk)}`;
       if (estimateTokens(content) + estimateTokens(SUMMARY_PROMPT) > summaryInput) {
         throw new Error("summary request exceeds model context budget");
       }
-      summary = await summaryText(content, summaryOutput, "summary");
+      const next = await summaryText(content, summaryOutput, "summary", chunk.at(-1).id);
+      handoff = mergeHandoffs(handoff, next);
+      summary = next.summary;
     }
-    return summary;
+    return handoff;
   }
-  async function rewriteText(previous, task, refs) {
+  async function rewriteText(previous, task, refs, coveredThrough) {
     const content = `任务卡（只读）：\n${task}\n\n当前累计状态：\n${previous}\n\n证据引用：\n${JSON.stringify(refs || [])}\n\n请重整为更短的累计状态；保留全部已验证结论的证据 ID、相互矛盾的实验及环境、待验证项、当前阶段和下一步。`;
     const rewriteOutput = Math.min(3072, Math.max(512, Math.floor(windowTokens * 0.14)));
     if (estimateTokens(content) + estimateTokens(SUMMARY_PROMPT) > windowTokens - rewriteOutput - Math.max(1024, Math.floor(windowTokens * 0.04))) {
       throw new Error("global rewrite request exceeds model context budget");
     }
-    return summaryText(content, rewriteOutput, "rewrite");
+    return summaryText(content, rewriteOutput, "rewrite", coveredThrough);
   }
 
   async function compactImpl(round, msgs, { force = false } = {}) {
     await sync(msgs);
+    try { if (getLedger) ledger = String(await getLedger() || ""); } catch {}
     const live = build();
     // Use the same full-request accounting at trigger, candidate and send time.
     // Only subtract fixed overhead when choosing how much raw history to retain.
@@ -195,7 +206,7 @@ export async function createUnifiedTurnContext({
     if (available <= 0) throw new Error("essential context exceeds model window; reduce tool definitions or the latest input");
     const current = messagesTokens(live) + estimateTokens(toolSpecs);
     const trigger = force ? 0 : Math.floor(hardInput * 0.75);
-    if (!force && (current <= trigger || (round < retryAfterRound && current <= hardInput))) return msgs;
+    if (!force && (current <= trigger || (round < retryAfterRound && current <= hardInput))) return live;
     const plan = planUnifiedCompaction(state, {
       triggerTokens: 0, // Full-request threshold was checked above.
       targetTokens: Math.floor(available * 0.55),
@@ -213,39 +224,44 @@ export async function createUnifiedTurnContext({
           taskCardVersion: state.taskCard.version, snapshotHead: state.lastId,
           beforeTokens: current,
         };
-        const shorter = await rewriteText(previous.summary, taskCardText(state, previous.coveredThrough), previous.evidenceRefs);
-        const candidate = commitUnifiedRewrite(state, snapshot, shorter);
+        const handoff = await rewriteText(previous.summary, taskCardText(state, previous.coveredThrough), previous.evidenceRefs, previous.coveredThrough);
+        const shorter = handoff.summary;
+        const candidate = commitUnifiedRewrite(state, snapshot, shorter, { handoff });
         const after = messagesTokens(build(candidate)) + toolTokens;
         if (after > hardInput) throw new Error("essential context still exceeds model window after global rewrite");
         candidate.compaction.tokensAfter = after;
         state = onRewrite
-          ? normalizeUnifiedContext(await onRewrite(snapshot, shorter, { afterTokens: after }))
+          ? normalizeUnifiedContext(await onRewrite(snapshot, shorter, { afterTokens: after, handoff }))
           : candidate;
         emit({ type: "checkpoint", round, summary: shorter });
+        try { await onCheckpoint?.(shorter); } catch {}
+        try { ledger = String(await getLedger?.() || ledger); } catch {}
         return build();
       }
       if (current > hardInput) throw new Error("context budget exceeded: no complete group can be compressed; archive or narrow the large tool result");
-      return msgs;
+      return live;
     }
     plan.beforeTokens = current;
     const refs = [...(state.compaction?.evidenceRefs || []), ...artifactRefs(plan.evicted)];
     if (onValidateEvidence) await onValidateEvidence(refs);
-    let summary = await summarize(plan);
-    let candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs });
+    let handoff = await summarize(plan);
+    let summary = handoff.summary;
+    let candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
     let after = messagesTokens(build(candidate)) + toolTokens;
     if (after > hardInput) {
-      summary = await rewriteText(summary, taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs);
-      candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs });
+      handoff = mergeHandoffs(handoff, await rewriteText(summary, taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs, candidate.compaction.coveredThrough));
+      summary = handoff.summary;
+      candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
       after = messagesTokens(build(candidate)) + toolTokens;
     }
     if (after > hardInput) throw new Error("context budget exceeded after compaction; archive the large tool result in a workspace or narrow its output");
     candidate.compaction.tokensAfter = after;
     state = onCommit
-      ? normalizeUnifiedContext(await onCommit(plan, summary, { evidenceRefs: refs, afterTokens: after }))
+      ? normalizeUnifiedContext(await onCommit(plan, summary, { evidenceRefs: refs, afterTokens: after, handoff }))
       : candidate;
-    try { ledger = String(await getLedger?.() || ledger); } catch {}
     emit({ type: "checkpoint", round, summary });
     try { await onCheckpoint?.(summary); } catch {}
+    try { ledger = String(await getLedger?.() || ledger); } catch {}
     return build();
   }
   async function compact(round, msgs, options = {}) {

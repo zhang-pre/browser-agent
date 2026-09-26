@@ -45,7 +45,7 @@ export function createUnifiedContext(messages = []) {
   const state = {
     version: UNIFIED_CONTEXT_VERSION, lastId: 0, events: [],
     taskCard: { version: 0, originalId: null, originalText: "", amendments: [] },
-    compaction: null,
+    compaction: null, memoryOutbox: [],
   };
   for (const m of messages) add(state, m);
   return state;
@@ -98,6 +98,7 @@ export function normalizeUnifiedContext(raw, messages = []) {
       amendments: Array.isArray(raw.taskCard.amendments) ? raw.taskCard.amendments.map(x => ({ ...x })) : [],
     },
     compaction: raw.compaction ? { ...raw.compaction } : null,
+    memoryOutbox: structuredClone(raw.memoryOutbox || []),
   };
   if (state.events.length !== state.lastId || state.events.some((e, i) => e.id !== i + 1)) {
     throw new Error("invalid unified context event sequence");
@@ -130,7 +131,7 @@ export function projectUnifiedMessages(state) {
   const card = taskCardText(state, covered);
   if (card) out.push({ role: "user", content: card, _contextSynthetic: true });
   if (state.compaction?.summary) {
-    out.push({ role: "user", content: `【累计执行状态】\n${state.compaction.summary}`, _contextSynthetic: true });
+    out.push({ role: "user", content: `【累计执行状态】\n${state.compaction.summary}${state.compaction.handoff?.nextAction ? "\n【下一步】" + state.compaction.handoff.nextAction : ""}`, _contextSynthetic: true });
   }
   for (const event of state.events) {
     if (event.id > covered) out.push({ ...modelMessage(event), _contextEventId: event.id });
@@ -183,7 +184,7 @@ export function planUnifiedCompaction(state, { triggerTokens, targetTokens, rece
     beforeTokens, targetTokens,
   };
 }
-export function commitUnifiedCompaction(raw, plan, summary, { evidenceRefs = [], afterTokens = 0 } = {}) {
+export function commitUnifiedCompaction(raw, plan, summary, { evidenceRefs = [], afterTokens = 0, handoff, workspaceRoot = null } = {}) {
   const state = normalizeUnifiedContext(raw);
   if (!summary || !String(summary).trim()) throw new Error("empty context summary");
   if (state.taskCard.version !== plan.taskCardVersion ||
@@ -208,13 +209,16 @@ export function commitUnifiedCompaction(raw, plan, summary, { evidenceRefs = [],
     coveredFrom: 1, coveredThrough: plan.cutoffId - 1, recentFrom: plan.cutoffId,
     snapshotHead: plan.snapshotHead, summary: String(summary).trim(),
     evidenceRefs: uniqueRefs,
+    ...(handoff ? { handoff } : {}),
     tokensBefore: plan.beforeTokens, tokensAfter: afterTokens,
   };
+  if (handoff) state.memoryOutbox.push({ version: state.compaction.version,
+    handoff: structuredClone(handoff), workspaceRoot, status: "pending", attempts: 0 });
   return state;
 }
 
 
-export function commitUnifiedRewrite(raw, snapshot, summary, { afterTokens = 0 } = {}) {
+export function commitUnifiedRewrite(raw, snapshot, summary, { afterTokens = 0, handoff, workspaceRoot = null } = {}) {
   const state = normalizeUnifiedContext(raw);
   const current = state.compaction;
   if (!current || !String(summary || "").trim()) throw new Error("cannot rewrite empty context");
@@ -226,8 +230,11 @@ export function commitUnifiedRewrite(raw, snapshot, summary, { afterTokens = 0 }
   }
   state.compaction = {
     ...current, version: current.version + 1, taskCardVersion: state.taskCard.version,
+    ...(handoff ? { handoff } : {}),
     summary: String(summary).trim(), snapshotHead: snapshot.snapshotHead,
     tokensBefore: snapshot.beforeTokens, tokensAfter: afterTokens,
   };
+  if (handoff) state.memoryOutbox.push({ version: state.compaction.version,
+    handoff: structuredClone(handoff), workspaceRoot, status: "pending", attempts: 0 });
   return state;
 }

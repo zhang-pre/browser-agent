@@ -1,104 +1,85 @@
-/* selftest-ledger-sql.mjs — LedgerBackend 作用域 SQL 与去重删除安全回归。
- * 跑：node dev/selftest-ledger-sql.mjs
- */
-import {
-  LedgerBackend,
-  ledgerDeleteByIdsSql,
-  ledgerScopeSql,
-} from "../modules/backends/LedgerBackend.sys.mjs";
-
-let pass = 0;
-let fail = 0;
-const ok = (condition, message) => {
-  if (condition) {
-    pass++;
-    console.log("  ✓", message);
-  } else {
-    fail++;
-    console.error("  ✗ FAIL:", message);
-  }
+// Real SQLite regression for migration, type safety, evidence and idempotence.
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { LedgerBackend } from "../modules/backends/LedgerBackend.sys.mjs";
+const sqlite = new DatabaseSync(":memory:");
+const calls = [];
+const conn = {
+  async execute(sql, params) {
+    calls.push({ sql, params });
+    const stmt = sqlite.prepare(sql);
+    const rows = Array.isArray(params) ? stmt.all(...params) : params ? stmt.all(params) : stmt.all();
+    return rows.map(value => ({ getResultByName: name => value[name] }));
+  },
+  async executeTransaction(fn) {
+    sqlite.exec("BEGIN");
+    try { const result = await fn(); sqlite.exec("COMMIT"); return result; }
+    catch (e) { sqlite.exec("ROLLBACK"); throw e; }
+  },
+  async close() { sqlite.close(); },
 };
+sqlite.exec("CREATE TABLE mem(id INTEGER PRIMARY KEY,site TEXT,workspace TEXT,kind TEXT,text TEXT,ev TEXT,ts TEXT,norm TEXT)");
+sqlite.exec("INSERT INTO mem VALUES(1,'test','/ws','fact','old assertion','old experiment','yesterday','old')");
+globalThis.ChromeUtils = { importESModule: () => ({ Sqlite: {
+  shutdown: { addBlocker() {}, removeBlocker() {} }, openConnection: async () => conn,
+} }) };
+globalThis.PathUtils = { profileDir: "/profile", join: (...x) => x.join("/") };
+globalThis.IOUtils = { async makeDirectory() {}, async writeUTF8() {} };
+const ledger = new LedgerBackend();
+ledger.currentSite = () => "test";
+const ctx = { workspaceRoot: "/ws" };
+await ledger._db();
+let rows = (await ledger.recall({}, ctx)).results;
+assert.equal(rows[0].kind, "observation");
+assert.equal(rows[0].status, "unverified");
+assert.equal(rows[0].evidence, "old experiment");
+console.log("OK old memory migrated without fabricated verification");
 
-function row(values) {
-  return { getResultByName: name => values[name] };
-}
+await ledger.append({ text: "sign might use AES-CBC", kind: "hypothesis" }, ctx);
+await assert.rejects(ledger.append({ text: "guess", kind: "unknown" }, ctx), /unknown/);
+await assert.rejects(ledger.append({ text: "guess", kind: "fact" }, ctx), /verified/);
+await assert.rejects(ledger.append({ text: "wrong", kind: "fact", status: "verified" }, ctx), /evidence/);
+await assert.rejects(ledger.append({ text: "one failure", kind: "deadend", status: "verified", evidence: "experiment" }, ctx), /conditions/);
+assert.match(await ledger.digest({}, ctx), /假设/);
+assert.match(await ledger.digest({}, ctx), /unverified/);
+console.log("OK hypothesis never coerces to fact; facts and failed paths require validation metadata");
 
-function fakeDb(existing = []) {
-  const calls = [];
-  return {
-    calls,
-    async execute(sql, params) {
-      calls.push({ sql, params });
-      return sql.startsWith("SELECT id,norm FROM mem") ? existing : [];
-    },
-  };
-}
+const hypothesis = (await ledger.recall({ kind: "hypothesis" }, ctx)).results[0];
+await ledger.append({ kind: "fact", status: "verified", text: "sign is AES-CBC",
+  evidence: "experiment X confirms against browser", supersedes: [hypothesis.id] }, ctx);
+rows = (await ledger.recall({}, ctx)).results;
+assert.equal(rows.find(x => x.id === hypothesis.id).status, "superseded");
+assert.ok(rows.some(x => x.kind === "fact" && x.status === "verified"));
+await assert.rejects(ledger.append({ text: "decision", kind: "decision", status: "verified", evidence: "proof", supersedes: [hypothesis.id] },
+  { workspaceRoot: "/different" }), /missing memory/);
 
-async function addWith({ workspaceRoot = "", site = "", existing = [], text = "已确认的签名入口" } = {}) {
-  const db = fakeDb(existing);
-  const ledger = new LedgerBackend();
-  ledger._db = async () => db;
-  ledger._renderMd = async () => {};
-  ledger.currentSite = () => site;
-  await ledger._addMany([{ kind: "fact", text }], { workspaceRoot });
-  return db.calls;
-}
+const handoff = { schemaVersion: 1, summary: "state", nextAction: "verify",
+  memories: [{ kind: "fact", status: "verified", text: "verified result", evidence: "",
+    evidenceIds: [7], evidenceRefs: [], conditions: "", artifact: null, supersedes: [] }] };
+const first = await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-A", version: 1 });
+assert.equal(first.added, 1);
+assert.equal((await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-A", version: 1 })).alreadyApplied, true);
+await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-B", version: 1 });
+rows = (await ledger.recall({ query: "verified result" }, ctx)).results;
+assert.equal(rows.length, 2);
+assert.deepEqual(rows.map(x => x.evidenceRefs[0].threadId).sort(), ["thread-A", "thread-B"]);
+await assert.rejects(ledger.mergeHandoff("## 已确认事实", ctx), /structured/);
+console.log("OK structured handoff, thread-qualified evidence and idempotent batch receipts");
 
-console.log("[1] workspace/site 使用完整 SQL allowlist");
-const wsSql = ledgerScopeSql("workspace");
-const siteSql = ledgerScopeSql("site");
-ok(wsSql.selectExisting.includes("workspace=:v") && !wsSql.selectExisting.includes("site=:v"), "workspace 分支选择固定 SQL");
-ok(siteSql.selectExisting.includes("site=:v") && !siteSql.selectExisting.includes("workspace=:v"), "site 分支选择固定 SQL");
-ok(wsSql.trimOldest.includes("workspace=:v") && siteSql.trimOldest.includes("site=:v"), "两分支封顶删除也来自固定 SQL");
+const execute = conn.execute;
+conn.execute = async (sql, params) => {
+  if (sql.startsWith("INSERT INTO memory_batches")) throw new Error("disk failure");
+  return execute(sql, params);
+};
+await assert.rejects(ledger.mergeHandoff(handoff, ctx, { threadId: "thread-C", version: 1 }), /disk failure/);
+assert.equal((await ledger.recall({ query: "verified result" }, ctx)).count, 2);
+conn.execute = execute;
+assert.equal((await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-C", version: 1 })).added, 1);
+console.log("OK failed batch rolls back entries and receipt; retry succeeds");
 
-console.log("[2] 未知列 fail-closed");
-let unknownRejected = false;
-try {
-  ledgerScopeSql("workspace OR 1=1; DROP TABLE mem;--");
-} catch {
-  unknownRejected = true;
-}
-ok(unknownRejected, "未知/恶意列名在执行前拒绝");
-
-console.log("[3] 外部 workspace/site 值只走绑定参数");
-const evilWorkspace = "/tmp/ws'); DROP TABLE mem;--";
-const workspaceCalls = await addWith({ workspaceRoot: evilWorkspace, site: "ignored.example" });
-ok(workspaceCalls.every(call => !call.sql.includes(evilWorkspace)), "workspace payload 不进入 SQL 文本");
-ok(workspaceCalls.some(call => call.params?.v === evilWorkspace), "workspace payload 通过 :v 绑定");
-ok(workspaceCalls.some(call => call.params?.w === evilWorkspace), "workspace INSERT 继续使用绑定参数");
-
-const evilSite = "example.test' OR 1=1;--";
-const siteCalls = await addWith({ site: evilSite });
-ok(siteCalls.every(call => !call.sql.includes(evilSite)), "site payload 不进入 SQL 文本");
-ok(siteCalls.some(call => call.params?.v === evilSite), "site payload 通过 :v 绑定");
-ok(siteCalls.some(call => call.params?.s === evilSite), "site INSERT 继续使用绑定参数");
-
-console.log("[4] dropIds 使用固定占位符 SQL");
-const text = "这是用于触发账本去重的相同文本";
-const evilId = "7); DROP TABLE mem;--";
-const dropCalls = await addWith({
-  workspaceRoot: "/safe/workspace",
-  text,
-  existing: [
-    row({ id: evilId, norm: "这是用于触发账本去重的相同文本" }),
-    row({ id: 8, norm: "这是用于触发账本去重的相同文本" }),
-  ],
-});
-const deleteByIds = dropCalls.find(call => call.sql.startsWith("DELETE FROM mem WHERE id IN"));
-ok(deleteByIds?.sql === "DELETE FROM mem WHERE id IN (?,?)", "多 ID 去重使用单条占位符 SQL");
-ok(JSON.stringify(deleteByIds?.params) === JSON.stringify([evilId, 8]), "全部 drop id 作为数组参数一次绑定");
-ok(dropCalls.every(call => !call.sql.includes(evilId)), "恶意 drop id 不进入 SQL 文本");
-ok(dropCalls.filter(call => call.sql === ledgerDeleteByIdsSql(2)).length === 1, "批量去重只执行一条语句");
-ok(ledgerDeleteByIdsSql(3) === "DELETE FROM mem WHERE id IN (?,?,?)", "占位符数量由整数 count 唯一决定");
-for (const badCount of [0, -1, 1.5, NaN, Infinity]) {
-  let rejected = false;
-  try {
-    ledgerDeleteByIdsSql(badCount);
-  } catch {
-    rejected = true;
-  }
-  ok(rejected, `非法 count ${String(badCount)} 在生成 SQL 前拒绝`);
-}
-
-console.log(`\nledger SQL selftest: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+const payload = "/ws'); DROP TABLE memory_v2;--";
+await ledger.append({ text: "safe", kind: "decision" }, { workspaceRoot: payload });
+assert.ok(calls.every(x => !x.sql.includes(payload)));
+assert.equal((await ledger.recall({}, { workspaceRoot: payload })).count, 1);
+await ledger.close();
+console.log("OK bound SQL and workspace isolation");

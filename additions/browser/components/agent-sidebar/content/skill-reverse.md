@@ -74,7 +74,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 - **wire 参数常 ≠ 最显眼 signer 的输出**（常见 `wire = wrapper(signer输出, 其它字段)`）。格式/长度/前缀对不上＝没找对，顺调用栈往上层找真正拼装 wire 值的函数。**没 diff 对上之前，别进字节码反汇编。**
 - **字节长度先速判**：写复刻代码前，先比「你假设的算法输出字节数」和「真实 wire 值解码后的字节数」——对不上（如假设 HMAC-SHA256＝32 字节、但 wire 解码后是 75 字节）就**立刻否决该假设、换方向**，别写一堆代码白验证。长度/前缀这种廉价信号能在 30 秒内排除大半错误假设。
 - **签名内含随机字节/nonce（有的签名末段带 random、很多 sig 拼了 nonce）→ 同输入每次输出不同、不可能逐字节复现历史样本**：这时 P2 的"对上真实 wire 值"标准要换成 **① 长度/结构对（解码后字节数、头部布局一致）+ ② 浏览器内 replay 验证**（page_eval 调 signer 生成一个**新**签名 → 立刻 fetch 真实接口 → 服务器返回有效数据＝入口确认）。**别在随机签名上死磕 byte-match**（会误判成"没找对"无限回退）。判断有没有随机：同一输入在浏览器里连调 signer 两次，输出变=有随机。
-- **没用真实 wire 值复现对上前，禁止往账本写「已确认/已破译」**：账本（remember）只记**验证过**的事实。把"看着像/猜的算法"当确认写进去，会污染账本、误导后续每一轮（确认过的不再重验、直接拿去用）——比没记还糟。没验证就写「待验证假设」，别写「已确认」。
+- **没用真实 wire 值复现对上前，禁止写入已验证事实**：猜测用 `kind:hypothesis, status:unverified`，原始现象用 `kind:observation`；只有完成验证、有可定位证据的结论才用 `kind:fact, status:verified`。证据互相冲突时分别保存实验和环境，不能靠摘要选一个为事实。
 - **不确定 signer 真实入参就别猜、更别暴力试**——生产代码混淆/单行，**别猜函数名**：`signer_trace(action:start, scriptUrl:signer脚本子串, argMatch:'/api')`——**`argMatch` 只抓实参匹配此正则的调用、跳过 init 那堆传配置对象的噪声，一枪命中 `sign('/api/...', ts)`**（不给 argMatch 时 init 调用会先占满、真 sign 在其后被永久漏掉＝实战"参数入口拦不到、兜几十轮"的根因；现已改环形缓冲留最后 N 条，但加 argMatch 最干净）→ 触发一次真实请求（**导航也能抓**，跨导航存活）→ `signer_trace(action:query)` 拿到**喂给 signer 的真实实参**（不注入页面）。**经验（通用）：url 实参常是 path/相对路径、且常不含 query string（`?a=b` 在 params 里单传）**——别拿完整 URL 去试。也能看到拦截器拿到的 `e`（含 `e.url`/`e.params`）。**这一步省掉"猜输入→暴力试→兜圈"的大坑。** `query count=0` = 没新请求触发，换种交互/page_navigate 重载再试。
 
 **4. P3/P4 判型选路**：`wasm_probe`(有 WASM) / 看 JSVMP 特征 → 按决策树选模式。**黑盒优先**：复刻**完整加载顺序 + init 调用**（signer 常由 glue/`_XxxInit` 编排多脚本，只 load 单文件＝signer 不存在，这是高频坑）。
@@ -93,8 +93,8 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 - **目标请求在浏览器点几下还触发不出来 → 别死磕"抓那一次真实样本"**：有了公式+skey，直接 Node 打真实接口，**返回有效业务数据本身就是验证**（不必非得在浏览器里截到目标那次请求）。`net_list` 反复同一结果＝没新请求，换一两次交互还不出就转"直接打接口"。
 
 ## 记账本（治压缩后兜圈重复，最重要的习惯）
-- **确认即记**：每定位到入口/函数/真值、每验证一个算法/特征、每排除一条死路 → 立刻 `remember(text, kind:fact|deadend, evidence)`。带**具体值**（偏移/真值/字节结构/调用方式），别只写"已定位 X"。
-- 账本**每轮自动注入你上下文顶部、压缩永不衰减、跨会话持久化（SQLite，按工作目录隔离）**——所以**动手前先看账本**：✅已确认的别重新发现/重抓/重解码，⛔已否决的别重走。这比反复写长摘要稳得多（散文摘要多压几次就丢细节，逼你重读重抓）。
+- **发现即记**：事实用 `remember(text, kind:fact, status:verified, evidence)`；已验证失败路径用 `kind:deadend, status:verified`，同时写 `evidence` 和 `conditions`。另支持 `hypothesis / observation / decision / artifact`；产物需 `artifact:{path,hash或version}`。验证推翻旧结论时用 `supersedes:[旧记忆ID]` 关联，保留原始证据。
+- 账本按工作目录存入 SQLite，每轮注入有预算上限的摘要；全文用 `recall` 检索，`ledger.md` 是可读镜像。动手前核对类型、验证状态和适用环境：未验证记录不能当事实，失败路径不是永久禁令；环境变化或证据冲突时重新验证。
 - **隔离模型**：自动注入只给**当前工作目录(=任务)**的账本——**换目录=新任务、干净起步**；要**续**之前的任务就**开回原目录**（它的账本自动回来）。remember 仍按域名打 site 标签，只是不再自动跨目录灌。
 - **开工/换方向先 `recall`**：跨**全部**任务/会话/站点按关键词/站点检索——查这个站点或类似目标**以前**确认过什么、排除过哪些死路，别从零开始。`recall(site:目标域名)` 或 `recall(query:关键词)` 翻历史（**工作目录可能已清空 → 历史结论先验证仍适用、产物按需重新落盘**）。
 
@@ -141,7 +141,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 | 白盒诊断 | **whitebox_diff(浏览器真值 vs Node复刻 引擎级差分→第一处分叉分支+源码行+驱动它的env值+崩溃栈;非侵入;治"复刻和浏览器结果对不上")** |
 | Web-API 指纹 | webapi_trace / webapi_query(env/flow) |
 | 工作目录 | fs_list / fs_read(offset/limit) / fs_write(append) / fs_copy / fs_mkdir / run_node / run_python / npm_install |
-| 记忆 | **remember(发现即记:fact/deadend→账本,每轮注入、压缩不衰减、SQLite跨会话)** / **recall(跨会话/站点检索历史记忆)** / notes_get / notes_add(跨会话按站点) |
+| 记忆 | **remember（六类记忆、验证状态和证据，SQLite 跨会话持久化）** / **recall（仅检索当前工作目录）** / notes_get / notes_add（按站点） |
 
 ## 结论模板
 参数在哪生成 · 算法/依赖/指纹输入 · 可独立复现（附可运行 .js/.py + 实打接口返回有效数据）· 关键结论 `notes_add` 沉淀。

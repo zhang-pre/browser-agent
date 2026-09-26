@@ -385,6 +385,25 @@ export class ConversationStore {
     return normalizeUnifiedContext(t.unifiedContext);
   }
 
+  /** Persist an outbox receipt; a crash before this write is safe to retry. */
+  async markMemorySync(id, version, error = "") {
+    const t = await this.getThread(id);
+    if (!t) throw new Error("conversation thread not found");
+    const previous = t.unifiedContext;
+    const next = normalizeUnifiedContext(previous);
+    const entry = next.memoryOutbox.find(x => x.version === version);
+    if (!entry) return;
+    if (error) {
+      entry.status = "pending";
+      entry.attempts++;
+      entry.lastError = String(error).slice(0, 300);
+    } else {
+      next.memoryOutbox = next.memoryOutbox.filter(x => x.version !== version);
+    }
+    t.unifiedContext = next;
+    try { await this._save(); } catch (e) { t.unifiedContext = previous; throw e; }
+  }
+
   /** Persist aggregate token counters without changing conversation ordering. */
   async addThreadUsage(id, usage) {
     const d = await this._load();

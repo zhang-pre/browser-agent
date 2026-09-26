@@ -1,3 +1,4 @@
+import { handoffJson } from "./handoff-fixture.mjs";
 import { contextStoreFixture } from "./context-store-fixture.mjs";
 import assert from "node:assert/strict";
 import { createAgentRuntime } from "../modules/runtime/AgentRuntime.sys.mjs";
@@ -218,7 +219,7 @@ function harness({ chat, dispatch, confirm = false, append } = {}) {
   const requests = [];
   await runAgentTurn({
     client: { model: "test", async chat(messages, options) {
-      if (!options.tools) { summaries++; return reply("summary without user correction"); }
+      if (!options.tools) { summaries++; return reply(handoffJson("summary without user correction")); }
       requests.push(structuredClone(messages));
       round++;
       return round <= 7 ? reply("", [call("c" + round)]) : reply("done");

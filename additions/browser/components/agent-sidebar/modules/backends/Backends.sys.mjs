@@ -46,8 +46,8 @@ export function getBackends() {
   const webapi = new WebApiBackend({ workspace });
   // 逆向进展笔记：跨会话按站点记"验证过的突破点/坑"，落 <工作目录>/.frx-notes.ndjson。
   const notes = new NotesBackend({ workspace });
-  // 任务级「沉淀式记忆」账本：已确认事实/已否决死路落 <工作目录>/.frx-ledger.ndjson + ledger.md，
-  // 引擎每轮+压缩后整本注入上下文（治压缩后重新发现/重走死路）。remember 工具写、digest 注入、mergeHandoff 自动沉淀。
+  // 按工作目录隔离的类型化记忆：profile 的 memory.sqlite 为主库，ledger.md 为可读镜像。
+  // remember 主动写入；结构化压缩交接通过持久化待同步队列入库；digest 按预算注入。
   const ledger = new LedgerBackend({ workspace });
   // 通用 SkillRegistry：内置逆向方法论 + 用户/工作区 SKILL.md；正文按需读取。
   const skill = new SkillBackend({ workspace }); // 无参数 skill_get 仍释放原内置脚手架

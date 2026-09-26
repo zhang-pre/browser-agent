@@ -3,6 +3,7 @@ export function contextStoreFixture() {
   const journals = new Map();
   const get = id => journals.get(id) || createUnifiedContext();
   return {
+    async markMemorySync() {},
     async getUnifiedContext(id) { return get(id); },
     async appendContextEvents(id, events) {
       const result = appendUnifiedEvents(get(id), events);

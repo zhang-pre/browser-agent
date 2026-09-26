@@ -1,3 +1,4 @@
+import { handoffJson } from "./handoff-fixture.mjs";
 import assert from "node:assert/strict";
 import { buildLlmRequest } from "../modules/llm/LlmProtocol.sys.mjs";
 import { runAgentTurn } from "../modules/runtime/AgentLoop.sys.mjs";
@@ -42,9 +43,9 @@ assert.equal(result.reasoningContent, "final reasoning");
 await store.appendMessage(thread.id, { role: "assistant", content: result.content, reasoning_content: result.reasoningContent });
 const reopened = await store.getModelMessages(thread.id);
 assert.equal(reopened.at(-1).reasoning_content, "final reasoning");
-assert.equal((await store.getModelMessages(thread.id, { strategy: "legacy" })).at(-1).reasoning_content, "final reasoning");
+assert.equal((await store.getModelMessages(thread.id)).at(-1).reasoning_content, "final reasoning");
 const ctx = await createUnifiedTurnContext({
-  client: { model: config.model, chat: async () => ({ content: "verified evidence", reasoningContent: "summarizer reasoning" }) },
+  client: { model: config.model, chat: async () => ({ content: handoffJson("verified evidence"), reasoningContent: "summarizer reasoning" }) },
   journal: await store.getUnifiedContext(thread.id), messages: reopened,
 });
 const compressed = await ctx.forceCompact(1, ctx.initialMessages);

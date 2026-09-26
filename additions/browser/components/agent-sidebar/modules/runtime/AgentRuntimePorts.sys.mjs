@@ -32,6 +32,7 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
  * @property {function(string): Promise<object>} getUnifiedContext
  * @property {function(string, Array): Promise<object>} appendContextEvents
  * @property {function(string, object, string, object): Promise<object>} commitUnifiedCompaction
+ * @property {function(string, number, string=): Promise<void>} markMemorySync
  * @property {function(string, object, string, object): Promise<object>} commitUnifiedRewrite
  */
 
@@ -198,6 +199,7 @@ export function defineAgentRuntimePorts(input) {
     "appendContextEvents",
     "commitUnifiedCompaction",
     "commitUnifiedRewrite",
+    "markMemorySync",
     "appendMessage",
     "addThreadUsage",
   ]);
@@ -245,6 +247,7 @@ export function defineAgentRuntimePorts(input) {
     appendContextEvents: bound(conversations, "appendContextEvents"),
     commitUnifiedCompaction: bound(conversations, "commitUnifiedCompaction"),
     commitUnifiedRewrite: bound(conversations, "commitUnifiedRewrite"),
+    markMemorySync: bound(conversations, "markMemorySync"),
   });
 
   return Object.freeze({

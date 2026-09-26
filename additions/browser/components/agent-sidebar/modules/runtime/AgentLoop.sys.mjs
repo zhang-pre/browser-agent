@@ -276,7 +276,7 @@ export async function runAgentTurn(p) {
     onCheckpoint, // 上下文压缩时回调(summary)：引擎据此把进展落盘成一条可见回复 + 重置实时步骤
     onUsage, // (rawUsage, {phase})：统一统计由上层按 provider 规范化并持久化
     persistToolArtifact, // 大工具结果落工作目录；返回 {path}，上下文只保留头尾与引用
-    getLedger, // 取任务账本注入块的回调(async→string)：每轮开头+每次压缩后拼进系统提示，确认事实永不衰减
+    getLedger, // 取任务账本注入块的回调(async→string)：每轮开头+每次压缩后刷新模型上下文，保留类型和验证状态
     confirm,
     autoApprove = false,
     assist = false, // AI辅助逐阶段模式：无工具的纯文字回复=正常收尾（停下报告+给方向），不当 drift 逼它继续
@@ -561,7 +561,7 @@ export async function runAgentTurn(p) {
           error:
             `⛔ 已用**相同参数**调用 ${name} ${rep.n + 1} 次、每次结果都一样（无新信息）——这是空转。` +
             `引擎已拒绝再次执行。**别重发同样的调用**：要么改参数（换 filter/换脚本/换 offset）、` +
-            `要么换工具、要么换策略。若该策略确实走不通，按账本登记"已否决假设(带证据)"再换路线，别原地磨。`,
+            `要么换工具、要么换策略。若该策略确实走不通，登记带证据和适用条件的失败路径（deadend，status=verified，conditions），证据不足则记待验证假设，再换路线，别原地磨。`,
         };
       } else if (router.needsConfirm(name)) {
         emit({ type: "confirm_request", name, args, id: tc.id });

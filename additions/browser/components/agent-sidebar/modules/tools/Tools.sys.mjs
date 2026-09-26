@@ -1,3 +1,4 @@
+import { MEMORY_KINDS } from "../state/MemoryContract.sys.mjs";
 /* Tools.sys.mjs — 内置工具规格工厂（Phase N0 起步，按 backend 在场情况自动注册）。
  *
  * createBuiltinTools(backends) 返回一组 ToolRouter spec。**只有其依赖的 backend
@@ -840,15 +841,18 @@ function toolTable() {
     ),
     T(
       "remember",
-      "把一条**已确认的事实**或**已否决的死路**记进任务账本（落 <工作目录>/ledger.md）。" +
-        "**发现即记、别等**：每定位到一个入口/函数/真值、每验证一个算法/特征、每排除一条路，就立刻记一条。" +
-        "账本**每轮都自动注入到你上下文顶部、压缩也永不衰减**——所以记过的就不必重新发现/重抓/重解码，否决的就不会重走。" +
-        "这是治「压缩后兜圈重复」的核心，比写长摘要更稳。",
+      "保存本工作目录的事实、假设、观察、失败路径、决策或产物。默认 hypothesis/unverified；" +
+        "fact 必须显式 status=verified 并提供验证证据；失败路径需写明适用条件。改变结论时通过 supersedes 关联旧记忆 ID，保留原始实验。",
       {
         type: "object",
         properties: {
-          text: { type: "string", description: "一句话写清：已确认的事实（**带具体定位/真值**——具体到 文件/函数/位置、已验证的算法或特征、关键运行时真值，别只写\"已定位 X\"），或要排除的死路+理由。≤500字" },
-          kind: { type: "string", enum: ["fact", "deadend"], description: "fact=已确认事实（默认）；deadend=已否决/别重试的方向" },
+          text: { type: "string", description: "写清记录内容及具体定位/观测值；假设保留不确定性，失败写明条件与理由。≤8000字符" },
+          kind: { type: "string", enum: MEMORY_KINDS, description: "默认 hypothesis；仅已验证结论可使用 fact" },
+          status: { type: "string", enum: ["verified", "unverified", "rejected", "superseded"], description: "默认 unverified；不能因摘要或猜测而升级为 verified" },
+          evidenceRefs: { type: "array", items: { type: "object", properties: { threadId: { type: "string" }, eventId: { type: "integer" } }, required: ["threadId", "eventId"] } },
+          conditions: { type: "string", description: "实验环境和适用条件，deadend 必填" },
+          artifact: { type: "object", properties: { path: { type: "string" }, hash: { type: "string" }, version: { type: "string" } }, required: ["path"] },
+          supersedes: { type: "array", items: { type: "string" }, description: "明确取代的本目录旧记忆 ID；只冲突而未验证时不要取代" },
           evidence: { type: "string", description: "证据：哪个工具+关键返回片段（如 net_get 某请求 / run_node 某输出）" },
         },
         required: ["text"],
@@ -858,14 +862,14 @@ function toolTable() {
     ),
     T(
       "recall",
-      "检索**当前工作目录(任务)**的历史记忆库（remember 沉淀的已确认事实/已否决死路，SQLite 持久化、**按目录隔离**）。" +
-        "本目录的记忆每轮已自动注入你上下文顶部；recall 用于按关键词/类型在**本目录**里精确查（不跨站点、不从全局捞）。" +
+      "检索**当前工作目录(任务)**的历史记忆库（remember 沉淀的各类型记录及验证状态，SQLite 持久化、**按目录隔离**）。" +
+        "本目录的记忆每轮已自动注入模型上下文；recall 用于按关键词/类型在**本目录**里精确查（不跨站点、不从全局捞）。" +
         "想复用某个旧任务的记忆，就「打开目录」开回那个任务的目录——记忆随目录回来。",
       {
         type: "object",
         properties: {
-          query: { type: "string", description: "关键词子串（匹配事实正文，如 签名函数名 / 某指纹项 / nonce / 目标参数名）" },
-          kind: { type: "string", enum: ["fact", "deadend"], description: "只看已确认事实 / 已否决死路" },
+          query: { type: "string", description: "关键词子串（匹配记忆正文与证据，如 签名函数名 / 某指纹项 / nonce / 目标参数名）" },
+          kind: { type: "string", enum: MEMORY_KINDS, description: "按记忆类型筛选，返回结果包含验证状态" },
           limit: { type: "integer", description: "最多返回几条，默认 20" },
         },
       },
