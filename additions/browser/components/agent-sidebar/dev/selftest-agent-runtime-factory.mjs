@@ -117,7 +117,8 @@ const backends = {
     async digest() {
       return "node ledger";
     },
-    async mergeHandoff() {},
+    async hasVerified() { return false; },
+      async mergeHandoff() {},
   },
   workspace: {
     async write({ path }) {

@@ -77,3 +77,13 @@ assert.equal((await store.getUnifiedContext(thread.id)).memoryOutbox.length, 0);
 await orchestrator._syncMemory(context);
 assert.equal(writes, 2, "successful outbox must not replay");
 console.log("OK orchestrator preserves summary on Ledger failure and retries in its original workspace");
+
+const failedJournal = createUnifiedContext([
+  { role: "user", content: "task" },
+  { role: "assistant", content: "", tool_calls: [{ id: "failed", type: "function", function: { name: "run_node", arguments: "{}" } }] },
+  { role: "tool", tool_call_id: "failed", content: JSON.stringify({ ok: true, data: { ok: false, exitCode: 1 } }) },
+]);
+const failedClaim = JSON.parse(handoffJson("unsupported"));
+failedClaim.facts = [{ text: "success", status: "verified", evidenceIds: [3] }];
+assert.throws(() => parseHandoff(JSON.stringify(failedClaim), failedJournal.events, 3), /failed evidence/);
+console.log("OK nested failed tool envelope cannot alone establish fact");

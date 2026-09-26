@@ -116,7 +116,7 @@ export class LedgerBackend {
     }
   }
 
-  /** 当前标签页主域（站点 key），取不到返回 ""。与 NotesBackend 同款。 */
+  /** 当前标签页主域（站点 key），取不到返回 ""。 */
   currentSite(ctx) {
     try {
       const win = agentWin(ctx);
@@ -132,11 +132,11 @@ export class LedgerBackend {
     }
   }
 
-  async _contextRows(ctx) {
+  async _contextRows(ctx, allWorkspaces = false) {
     const ws = ctx?.workspaceRoot || "";
-    if (!ws) return [];
+    if (!ws && !allWorkspaces) return [];
     const db = await this._db();
-    const rows = await db.execute("SELECT memory_key,kind,status,text,ev,payload,site,ts FROM memory_v2 WHERE workspace=:ws ORDER BY id DESC", { ws });
+    const rows = await db.execute("SELECT memory_key,kind,status,text,ev,payload,site,ts,workspace FROM memory_v2" + (allWorkspaces ? "" : " WHERE workspace=:ws") + " ORDER BY id DESC", allWorkspaces ? {} : { ws });
     const all = rows.map(r => this._row(r));
     const superseded = new Set(all.flatMap(x => x.supersedes || []));
     return all.map(x => superseded.has(x.id) ? { ...x, status: "superseded" } : x);
@@ -146,7 +146,7 @@ export class LedgerBackend {
     let payload = {};
     try { payload = JSON.parse(r.getResultByName("payload") || "{}"); } catch {}
     return { ...payload, id: r.getResultByName("memory_key"), kind: r.getResultByName("kind"),
-      site: r.getResultByName("site"), timestamp: r.getResultByName("ts"),
+      workspace: r.getResultByName("workspace"), site: r.getResultByName("site"), timestamp: r.getResultByName("ts"),
       status: r.getResultByName("status"), text: r.getResultByName("text"), evidence: r.getResultByName("ev") };
   }
 
@@ -169,7 +169,7 @@ export class LedgerBackend {
   async _renderMd(ctx) {
     if (!ctx?.workspaceRoot) return;
     const body = "# 任务记忆（SQLite）\n\n" + this._format(await this._contextRows(ctx)) + "\n";
-    try { await IOUtils.writeUTF8(PathUtils.join(ctx.workspaceRoot, MD), body); } catch {}
+    await IOUtils.writeUTF8(PathUtils.join(ctx.workspaceRoot, MD), body);
   }
 
   async _addMany(items, ctx, db = null, batchKey = "") {
@@ -219,22 +219,32 @@ export class LedgerBackend {
       (body.length > maxChars ? "\n…全文见 ledger.md 或 recall。" : "");
   }
 
-  async recall({ query, kind, limit = 20 } = {}, ctx) {
+  async hasVerified(ctx) {
+    return (await this._contextRows(ctx)).some(x => x.status === "verified" &&
+      (x.evidence?.trim() || x.evidenceRefs?.length));
+  }
+
+  async recall({ query, kind, status, scope = "current", workspace, limit = 20 } = {}, ctx) {
     if (kind && !MEMORY_KINDS.includes(kind)) throw new Error("unknown memory kind");
-    const rows = await this._contextRows(ctx);
-    const results = rows.filter(x => (!kind || x.kind === kind) &&
+    if (!["current", "workspace", "all"].includes(scope)) throw new Error("invalid recall scope");
+    if (scope === "workspace" && !workspace?.trim()) throw new Error("explicit workspace required");
+    if (scope === "current" && workspace) throw new Error("set scope=workspace for cross-workspace recall");
+    if (status && !["verified", "unverified", "rejected", "superseded"].includes(status)) throw new Error("invalid status");
+    const rows = await this._contextRows(scope === "workspace" ? { ...ctx, workspaceRoot: workspace } : ctx, scope === "all");
+    const results = rows.filter(x => (!kind || x.kind === kind) && (!status || x.status === status) &&
       (!query || (x.text + " " + x.evidence).toLowerCase().includes(String(query).toLowerCase())))
       .slice(0, Math.max(1, Math.min(100, Number(limit) || 20)));
     return { ok: true, count: results.length, results };
   }
 
   // Structured input only. Batch receipt and all entries commit together.
-  async mergeHandoff(handoff, ctx, { threadId, version } = {}) {
+  async mergeHandoff(handoff, ctx, { threadId, version, source = "compaction" } = {}) {
     if (!handoff || handoff.schemaVersion !== 1 || !Array.isArray(handoff.memories) ||
         !threadId || !Number.isSafeInteger(version) || version < 1) throw new Error("invalid structured memory handoff");
     if (!ctx?.workspaceRoot) throw new Error("memory sync requires workspace");
     const items = qualifyHandoff(handoff, threadId);
-    const batchKey = threadId + ":" + version;
+    if (!["compaction", "completion"].includes(source)) throw new Error("invalid memory batch source");
+    const batchKey = threadId + ":" + (source === "completion" ? "completion:" : "") + version;
     const db = await this._db();
     const result = await db.executeTransaction(async () => {
       const seen = await db.execute("SELECT batch_key FROM memory_batches WHERE batch_key=:key", { key: batchKey });

@@ -4,6 +4,7 @@ export function contextStoreFixture() {
   const get = id => journals.get(id) || createUnifiedContext();
   return {
     async markMemorySync() {},
+    async setMemoryCompletion() {},
     async getUnifiedContext(id) { return get(id); },
     async appendContextEvents(id, events) {
       const result = appendUnifiedEvents(get(id), events);

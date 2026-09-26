@@ -155,7 +155,8 @@ export function createAgentRuntime(inputPorts) {
     },
 
     stop(threadId) {
-      if (runtimeCore.abortThread(threadId)) {
+      const taskCompleted = runtimeCore.getState(threadId)?.taskCompleted;
+      if (runtimeCore.abortThread(threadId) && !taskCompleted) {
         void ports.conversations
           .setThreadTurnStatus(threadId, "cancelled")
           .catch(() => {});

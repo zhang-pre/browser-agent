@@ -67,7 +67,7 @@ function harness({ chat, dispatch, confirm = false, append } = {}) {
     },
     tools: {
       getRouter: () => router,
-      getBackends: () => ({ ledger: { digest: async () => "", mergeHandoff: async () => {} }, workspace: { write: async () => ({}) } }),
+      getBackends: () => ({ ledger: { digest: async () => "", mergeHandoff: async () => {}, hasVerified: async () => false }, workspace: { write: async () => ({}) } }),
       createContext: input => input,
     },
   });

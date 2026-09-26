@@ -1,4 +1,4 @@
-import { parseHandoff, mergeHandoffs } from "./MemoryContract.sys.mjs";
+import { parseHandoff, mergeHandoffs, SUMMARY_PROMPT } from "./MemoryContract.sys.mjs";
 import { resolveContextWindowTokens } from "../llm/LlmClient.sys.mjs";
 // UnifiedTurnContext.sys.mjs — one budget and one compaction path across user turns.
 import {
@@ -9,11 +9,6 @@ import {
 
 const START = "⟪FRX_RUNTIME_CONTEXT_START⟫";
 const END = "⟪FRX_RUNTIME_CONTEXT_END⟫";
-const SUMMARY_PROMPT = `维护 Web 逆向任务的累计执行状态。输出结构化交接记录，保留目标的引用、已验证事实及证据 ID、待验证假设、相互矛盾的实验及各自环境、失败实验的适用条件、产物路径/版本、当前阶段和下一步。
-你只能更新执行状态，不得修改任务卡中的有效目标。未知结论不得升级为已验证；矛盾实验标记待验证。精确签名/密文/请求体引用原始产物，不重新抄写。
-本次输入按日志 ID 顺序排列。只输出一个 JSON 对象，不加 Markdown 围栏：
-{"schemaVersion":1,"summary":"累计状态（含矛盾、环境差异、当前阶段）","facts":[],"hypotheses":[],"deadends":[],"decisions":[],"artifacts":[],"observations":[],"nextAction":"下一步"}
-每个数组项必须有 text、status、evidenceIds（整数日志 ID 数组）。facts 仅可放有实验证据的 verified 结论；hypotheses 默认 unverified；deadends 必须 verified 且填写 conditions（失败实验的适用条件），单次失败不得概括为永不重试。artifact 项额外填写 artifact:{path,version或hash}。其他类型按实际状态填写。未知、矛盾或只有失败证据的结论留在 hypotheses/observations；严禁为了满足格式升级为 verified。summary 必须包含下一步。只引用输入中的证据 ID。`;
 const number = (value, fallback) => Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 
 function stripRuntime(content) {

@@ -81,5 +81,24 @@ const payload = "/ws'); DROP TABLE memory_v2;--";
 await ledger.append({ text: "safe", kind: "decision" }, { workspaceRoot: payload });
 assert.ok(calls.every(x => !x.sql.includes(payload)));
 assert.equal((await ledger.recall({}, { workspaceRoot: payload })).count, 1);
+
+assert.equal(await ledger.hasVerified(ctx), true);
+assert.equal(await ledger.hasVerified({ workspaceRoot: payload }), false);
+assert.equal((await ledger.recall({ scope: "workspace", workspace: payload }, ctx)).count, 1);
+assert.ok((await ledger.recall({ scope: "all" }, ctx)).results.some(x => x.workspace === payload));
+assert.equal((await ledger.recall({ status: "verified" }, ctx)).results.every(x => x.status === "verified"), true);
+await assert.rejects(ledger.recall({ scope: "workspace" }, ctx), /workspace/);
+await assert.rejects(ledger.recall({ workspace: payload }, ctx), /scope/);
+const completion = await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-A", version: 1, source: "completion" });
+assert.equal(completion.alreadyApplied, undefined, "completion receipt must not collide with compaction");
+assert.equal((await ledger.mergeHandoff(handoff, ctx, { threadId: "thread-A", version: 1, source: "completion" })).alreadyApplied, true);
+console.log("OK explicit cross-workspace recall, verified gate and independent completion receipt");
+
+const writeMirror = globalThis.IOUtils.writeUTF8;
+globalThis.IOUtils.writeUTF8 = async () => { throw new Error("mirror unavailable"); };
+await assert.rejects(ledger.mergeHandoff(handoff, ctx, { threadId: "mirror", source: "completion", version: 5 }), /mirror unavailable/);
+globalThis.IOUtils.writeUTF8 = writeMirror;
+assert.equal((await ledger.mergeHandoff(handoff, ctx, { threadId: "mirror", source: "completion", version: 5 })).alreadyApplied, true);
+console.log("OK ledger mirror failure remains visible and its retry does not duplicate SQLite records");
 await ledger.close();
 console.log("OK bound SQL and workspace isolation");

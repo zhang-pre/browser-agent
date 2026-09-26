@@ -5,6 +5,7 @@
  * in AgentRuntimeCore; Firefox-specific primitives arrive through injected ports.
  */
 
+import { runCompletionMemory } from "../state/CompletionMemory.sys.mjs";
 import { slimifySteps, textFromSteps } from "./AgentRuntimeCore.sys.mjs";
 import {
   assertAgentBackendsPort,
@@ -151,6 +152,7 @@ export class AgentTurnOrchestrator {
     context.vision = this._detectVision(context.client);
     context.turnMessages = await this._loadTurnMessages(context);
     await this._syncMemory(context);
+    await this._completionMemory(context, true);
     context.journal = await this.conversationStore.getUnifiedContext(context.threadId);
   }
 
@@ -475,17 +477,32 @@ export class AgentTurnOrchestrator {
     this.runtimeCore.notify(state);
   }
 
+  async _completionMemory(context, retryOnly = false) {
+    await runCompletionMemory({
+      store: this.conversationStore, ledger: context.backends.ledger, client: context.client,
+      threadId: context.threadId, workspaceRoot: context.workspaceRoot, toolContext: context.toolContext,
+      signal: context.abortController.signal, cacheKey: context.cacheKey, onUsage: context.recordUsage, retryOnly,
+      readEvidence: context.backends.workspace?.read
+        ? args => context.backends.workspace.read(args, context.toolContext) : undefined,
+      onStatus: value => { context.state.memoryCompletion = value; this.runtimeCore.notify(context.state); },
+    });
+  }
+
   async _complete(context, result) {
     const { state, threadId } = context;
-    state.aborted =
-      context.abortController.signal.aborted ||
-      (result && result.stopReason === "aborted");
+    state.aborted = context.abortController.signal.aborted || result?.stopReason === "aborted";
     state.content = result?.content || textFromSteps(state.steps) || "";
-    await this._persist(threadId, state.content, state.steps, { reasoningContent: result?.reasoningContent });
-    await this._setTurnStatus(
-      threadId,
-      state.aborted ? "cancelled" : "completed"
-    );
+    const persisted = await this._persist(threadId, state.content, state.steps, { reasoningContent: result?.reasoningContent });
+    await this._setTurnStatus(threadId, state.aborted ? "cancelled" : "completed");
+    if (!state.aborted && persisted && (!result?.stopReason || ["stop", "final"].includes(result.stopReason))) {
+      // Publish the saved answer before extracting memory; keep a cancellable
+      // runtime reservation until extraction settles to prevent overlapping runs.
+      state.taskCompleted = true;
+      state.steps = [];
+      state.checkpointSeq++;
+      this.runtimeCore.notify(state);
+      await this._completionMemory(context);
+    }
   }
 
   async _fail(context, error) {
@@ -543,8 +560,10 @@ export class AgentTurnOrchestrator {
         ...(reasoningContent !== undefined ? { reasoning_content: reasoningContent } : {}),
         ...(slim.length ? { steps: slim } : {}),
       });
+      return true;
     } catch {
       // Persistence failure does not erase in-memory progress.
+      return false;
     }
   }
 }

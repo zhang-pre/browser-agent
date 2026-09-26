@@ -64,7 +64,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 - **多 chunk / hash 文件名站点（XHS 等）必看**：① 返回的 `matchedFunctions` 是**函数数**不是文件数（`findScripts` 按函数算，一个压缩大文件几千个函数→命中几千个是**正常**、不是匹配 bug）；② 命中一整个大文件**没给 argMatch** → onEnterFrame 被刷爆、安全阀很快自卸 + ring buffer 全噪声 → **必给 argMatch**（签名 url 的 `'/api'`/`'^/'`、或目标参数名子串）收窄到真 sign；③ **不知道签名在哪个 chunk** 就别瞎猜 hash → 先 hook fetch/XHR（hook 日志大法）看签名输出 + `net_get` 的 `initiatorStack` 定位真正发起的 chunk，再 signer_trace 那个 chunk；④ trace 装好后**别拖太久才触发**（虽已放宽到 120s 自愈，但忙页面背景帧仍会消耗预算）。
 
 ## 常规执行链（从上往下推，别在一处死磕）
-**0. 开工（30 秒）**：`notes_get` 看本站历史 → 明确目标参数名 + 它在哪个请求 → 设好工作目录。
+**0. 开工（30 秒）**：`recall` 看本站历史 → 明确目标参数名 + 它在哪个请求 → 设好工作目录。
 
 **1. P0 拿真实样本**：`net_capture start`（自动带发起者栈）→ 页内**滚动/点击触发**目标请求（别整页刷新，会丢栈）→ `net_list` 找带目标参数的请求 → `net_get` 看 URL/headers/**initiatorStack**。把**逐字节真实样本 + 对应输入**记进 ledger。
 
@@ -93,10 +93,10 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 - **目标请求在浏览器点几下还触发不出来 → 别死磕"抓那一次真实样本"**：有了公式+skey，直接 Node 打真实接口，**返回有效业务数据本身就是验证**（不必非得在浏览器里截到目标那次请求）。`net_list` 反复同一结果＝没新请求，换一两次交互还不出就转"直接打接口"。
 
 ## 记账本（治压缩后兜圈重复，最重要的习惯）
-- **发现即记**：事实用 `remember(text, kind:fact, status:verified, evidence)`；已验证失败路径用 `kind:deadend, status:verified`，同时写 `evidence` 和 `conditions`。另支持 `hypothesis / observation / decision / artifact`；产物需 `artifact:{path,hash或version}`。验证推翻旧结论时用 `supersedes:[旧记忆ID]` 关联，保留原始证据。
+- **事件触发，立即记录**：确认关键入口、验证参数规则或实验结果、发现有证据的失败条件、形成影响后续路线的重要假设或决策、验证最终产物后，立即调用 remember；不等压缩或结束。只记影响决策的增量信息，避免普通工具流水。fact 必须 status:verified 并提供证据；未验证解释用 hypothesis，现象用 observation；deadend 必须 verified、有证据和 conditions；artifact 提供路径及 hash/version。取代旧结论用 supersedes，证据冲突时保留双方及环境。
 - 账本按工作目录存入 SQLite，每轮注入有预算上限的摘要；全文用 `recall` 检索，`ledger.md` 是可读镜像。动手前核对类型、验证状态和适用环境：未验证记录不能当事实，失败路径不是永久禁令；环境变化或证据冲突时重新验证。
 - **隔离模型**：自动注入只给**当前工作目录(=任务)**的账本——**换目录=新任务、干净起步**；要**续**之前的任务就**开回原目录**（它的账本自动回来）。remember 仍按域名打 site 标签，只是不再自动跨目录灌。
-- **开工/换方向先 `recall`**：跨**全部**任务/会话/站点按关键词/站点检索——查这个站点或类似目标**以前**确认过什么、排除过哪些死路，别从零开始。`recall(site:目标域名)` 或 `recall(query:关键词)` 翻历史（**工作目录可能已清空 → 历史结论先验证仍适用、产物按需重新落盘**）。
+- **开工/换方向先 recall**：默认只检索当前工作目录。需要复用其他任务时，显式指定 scope:workspace 与 workspace 路径，或 scope:all。结果保留来源目录；历史结论使用前核查证据和适用环境。ledger.md 是系统生成的镜像，不直接覆盖。
 
 ## 反绕圈（自己掌握，引擎只轻提醒）
 - **⛔ 最高优先级·工具的硬限制 ≠「此路不通」**（这是本 Agent 最容易犯、代价最大的坑）。撞到**执行层约束**——`page_eval` 输出被截、`run_node` 超时、结果被上下文上限截、`fs_read` 整读被拦——那是**工具用法要换**（加 `saveTo` 落盘 / 提高超时 / `fs_read(offset,limit)` 分段 / `code_search` 精搜），**绝不是分析路线死了**。**严禁**因为撞了个工具上限，就编一个"体面根因"（如"环境校验/指纹绕不过"）、再甩一个"转白盒 / 转 oracle 二选一"来收尾结案。下结论前先问自己：这是**路真走不通（有证据、复现过失败）**，还是**我把工具用错了 / 撞了个上限**？——后者占绝大多数。**症状识别**：看到"truncated / 被截 / 只回了一截 / can't get it in one call / 输出不完整" = 工具上限，换用法、别换策略、更别结案。
@@ -127,7 +127,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 - **取大源码/大输出：`page_eval` 一律加 `saveTo` 落盘，别用裸 page_eval（默认动作、肌肉记忆）**。`fn.toString()` 取混淆 dispatcher / signer 源码（动辄几万~几十万字）、或任何可能超 ~20K 的 page_eval 结果 → **`page_eval({expression:'x.toString()', saveTo:'work/x.js'})` 直接落完整结果到文件**，再 `code_search('关键词','work/x.js')` / `fs_read('work/x.js',offset,limit)` 分析。**别裸 `page_eval('x.toString()')` 再 substring 分段拼**——单次结果 >20K 会被截、分段边界还会被再截导致**错位丢字**，你却**不自知**、拿残缺源码往下跑（实战扣 5 万字混淆 dispatcher 就栽这、烧十几轮还误判成"环境绕不过"）。万一裸调了：返回里 `totalLength > returnedLength` 就是被截了 → 立刻改 `saveTo` 重取，别在残缺数据上分析。
 - 别 `fs_write` 大文件全文（撞输出上限会截断卡死）→ 改现成文件用 `fs_copy` + 只写小 loader。
 - 按用途分目录：抓的脚本 `scripts/`、wasm/wat `wasm/`、你写的 loader/中间数据 `work/`、最终产物 `out/`、trace `jsvmp/`+`webapi/`。`fs_write` 给**裸文件名**（`x.js`/`data.json` 等）会**自动归 `work/`**——不用自己加前缀；要落别处就显式写目录（如 `out/main.js`）。`progress.md`/`ledger.md`/`package.json` 等仍留根。
-- 每验证通过一个关键结论 → `notes_add`（只记验证过的），下次复用。
+- 每验证通过一个关键结论 → `remember`（只记验证过的），下次复用。
 
 ## 工具速查
 | 组 | 工具 |
@@ -141,7 +141,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 | 白盒诊断 | **whitebox_diff(浏览器真值 vs Node复刻 引擎级差分→第一处分叉分支+源码行+驱动它的env值+崩溃栈;非侵入;治"复刻和浏览器结果对不上")** |
 | Web-API 指纹 | webapi_trace / webapi_query(env/flow) |
 | 工作目录 | fs_list / fs_read(offset/limit) / fs_write(append) / fs_copy / fs_mkdir / run_node / run_python / npm_install |
-| 记忆 | **remember（六类记忆、验证状态和证据，SQLite 跨会话持久化）** / **recall（仅检索当前工作目录）** / notes_get / notes_add（按站点） |
+| 记忆 | **remember（六类记忆、验证状态和证据，SQLite 持久化）** / **recall（默认当前目录，显式指定可跨目录）** |
 
 ## 结论模板
-参数在哪生成 · 算法/依赖/指纹输入 · 可独立复现（附可运行 .js/.py + 实打接口返回有效数据）· 关键结论 `notes_add` 沉淀。
+参数在哪生成 · 算法/依赖/指纹输入 · 可独立复现（附可运行 .js/.py + 实打接口返回有效数据）· 关键结论 `remember` 沉淀。

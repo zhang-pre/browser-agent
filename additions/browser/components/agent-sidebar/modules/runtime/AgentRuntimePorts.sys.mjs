@@ -33,6 +33,7 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
  * @property {function(string, Array): Promise<object>} appendContextEvents
  * @property {function(string, object, string, object): Promise<object>} commitUnifiedCompaction
  * @property {function(string, number, string=): Promise<void>} markMemorySync
+ * @property {function(string, object): Promise<object>} setMemoryCompletion
  * @property {function(string, object, string, object): Promise<object>} commitUnifiedRewrite
  */
 
@@ -61,7 +62,7 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
 
 /**
  * @typedef {object} AgentRuntimeBackendsPort
- * @property {{digest: Function, mergeHandoff: Function}} ledger
+ * @property {{digest: Function, mergeHandoff: Function, hasVerified: Function}} ledger
  * @property {{write: Function, read?: Function}} workspace
  */
 
@@ -145,12 +146,14 @@ export function assertAgentBackendsPort(backends) {
   requireMethods(ledger, "ports.tools.getBackends().ledger", [
     "digest",
     "mergeHandoff",
+    "hasVerified",
   ]);
   requireMethods(workspace, "ports.tools.getBackends().workspace", ["write"]);
   return Object.freeze({
     ledger: Object.freeze({
       digest: bound(ledger, "digest"),
       mergeHandoff: bound(ledger, "mergeHandoff"),
+      hasVerified: bound(ledger, "hasVerified"),
     }),
     workspace: Object.freeze({
       write: bound(workspace, "write"),
@@ -200,6 +203,7 @@ export function defineAgentRuntimePorts(input) {
     "commitUnifiedCompaction",
     "commitUnifiedRewrite",
     "markMemorySync",
+    "setMemoryCompletion",
     "appendMessage",
     "addThreadUsage",
   ]);
@@ -248,6 +252,7 @@ export function defineAgentRuntimePorts(input) {
     commitUnifiedCompaction: bound(conversations, "commitUnifiedCompaction"),
     commitUnifiedRewrite: bound(conversations, "commitUnifiedRewrite"),
     markMemorySync: bound(conversations, "markMemorySync"),
+    setMemoryCompletion: bound(conversations, "setMemoryCompletion"),
   });
 
   return Object.freeze({

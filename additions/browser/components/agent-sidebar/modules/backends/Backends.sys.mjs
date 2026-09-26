@@ -16,7 +16,6 @@ import { CodeBackend } from "./CodeBackend.sys.mjs";
 import { JsvmpBackend } from "./JsvmpBackend.sys.mjs";
 import { WebApiBackend } from "./WebApiBackend.sys.mjs";
 import { WorkspaceBackend } from "./WorkspaceBackend.sys.mjs";
-import { NotesBackend } from "./NotesBackend.sys.mjs";
 import { LedgerBackend } from "./LedgerBackend.sys.mjs";
 import { SkillBackend } from "./SkillBackend.sys.mjs";
 import { EnvironmentBackend } from "./EnvironmentBackend.sys.mjs";
@@ -44,8 +43,6 @@ export function getBackends() {
   // WebApiBackend 读 C++ 引擎层通用 Web-API 调用 trace（环境依赖/IO 边界/WASM 边界，JS 不可检测）。
   // 传 workspace：env/flow 查询时把完整指纹清单落盘到 <工作目录>/webapi/，用户/AI 都能找到。
   const webapi = new WebApiBackend({ workspace });
-  // 逆向进展笔记：跨会话按站点记"验证过的突破点/坑"，落 <工作目录>/.frx-notes.ndjson。
-  const notes = new NotesBackend({ workspace });
   // 按工作目录隔离的类型化记忆：profile 的 memory.sqlite 为主库，ledger.md 为可读镜像。
   // remember 主动写入；结构化压缩交接通过持久化待同步队列入库；digest 按预算注入。
   const ledger = new LedgerBackend({ workspace });
@@ -198,6 +195,6 @@ export function getBackends() {
     },
   };
 
-  _singleton = { page, net, scripts, code, jsvmp, webapi, workspace, notes, ledger, skill, env, addons, find, cookies };
+  _singleton = { page, net, scripts, code, jsvmp, webapi, workspace, ledger, skill, env, addons, find, cookies };
   return _singleton;
 }

@@ -68,6 +68,7 @@ function makeHarness({
       async digest() {
         return "ledger";
       },
+      async hasVerified() { return false; },
       async mergeHandoff() {},
     },
     workspace: {
@@ -287,7 +288,7 @@ const continuedState = continued.core.getState("thread-continue");
 check(
   "non-terminal result starts a fresh segment",
   continued.calls.length === 2 &&
-    continuedState.checkpointSeq === 1 &&
+    continuedState.checkpointSeq === 2 &&
     continued.messages.map(item => item.content).join(",") ===
       "phase one,all done"
 );
@@ -297,9 +298,9 @@ check(
     continued.calls[1].messages.at(-1).content.includes("自动续跑")
 );
 check(
-  "new segment owns only its own live steps",
-  continuedState.steps.length === 1 &&
-    continuedState.steps[0].text === "final stream"
+  "completed segment is persisted once and cleared from live display",
+  continuedState.steps.length === 0 && continuedState.taskCompleted &&
+    continued.messages.at(-1).steps[0].text === "final stream"
 );
 
 const failed = makeHarness({

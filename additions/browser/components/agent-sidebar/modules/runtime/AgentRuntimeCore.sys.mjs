@@ -130,6 +130,8 @@ export class AgentRuntimeCore {
     state.usage = usage;
     state.lastUsage = null;
     state.contextProjected = false;
+    state.taskCompleted = false;
+    state.memoryCompletion = null;
     if (state._notifyTimer) {
       this.clearTimeout(state._notifyTimer);
       state._notifyTimer = null;
@@ -209,6 +211,8 @@ export class AgentRuntimeCore {
   snapshot(state) {
     return {
       running: state.running,
+      taskCompleted: state.taskCompleted === true,
+      memoryCompletion: state.memoryCompletion ? { ...state.memoryCompletion } : null,
       acceptingSteer: state.acceptingSteer,
       steering: state.steering.map(item => ({ ...item })),
       settled: state.settled,
@@ -359,7 +363,7 @@ export class AgentRuntimeCore {
         // The confirmation waiter may already have settled.
       }
     }
-    state.aborted = true;
+    if (!state.taskCompleted) state.aborted = true;
     this.notify(state);
     return true;
   }

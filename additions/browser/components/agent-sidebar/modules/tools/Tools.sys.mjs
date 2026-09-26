@@ -805,44 +805,14 @@ function toolTable() {
       (b, a, ctx) => b.skill.readResource(a, ctx)
     ),
 
-    // ───────── ⑨ 逆向进展笔记（跨会话按站点记"验证过的突破点/坑"） ─────────
-    T(
-      "notes_add",
-      "记一条**验证通过**的逆向进展笔记到本地（<工作目录>/.frx-notes.ndjson，按站点）。" +
-        "**只在结论已跑通/对比一致时才记**（如签名公式、关键入口、指纹依赖、踩过的坑）。下次逆向同站点会自动提示。" +
-        "⚠ 别记未验证的猜测；站点会改版，记的是经验不是长期真理。",
-      {
-        type: "object",
-        properties: {
-          note: { type: "string", description: "一句话结论（突破点/坑/算法/指纹依赖），≤600字" },
-          site: { type: "string", description: "站点域名，省略=当前标签页域名" },
-          topic: { type: "string", description: "主题，如 sign / token / 登录" },
-          kind: { type: "string", enum: ["breakthrough", "pitfall", "env", "algo", "endpoint", "note"], description: "突破点/坑/指纹/算法/接口/其他" },
-          verifiedBy: { type: "string", description: "怎么验证的（如：业务API返回status_code:0 / 与浏览器逐字节一致）" },
-        },
-        required: ["note"],
-      },
-      b => b.notes && b.notes.add,
-      (b, a, ctx) => b.notes.add(a, ctx)
-    ),
-    T(
-      "notes_get",
-      "读历史逆向进展笔记（默认当前站点，最近若干条）。开工前先看：可能有突破点/要避的坑。⚠ 站点会改版，仅供参考、用前先验证。",
-      {
-        type: "object",
-        properties: {
-          site: { type: "string", description: "站点域名子串，省略=当前标签页域名" },
-          limit: { type: "integer", description: "最近 N 条，默认 30" },
-          all: { type: "boolean", description: "true=不按站点过滤，返回全部" },
-        },
-      },
-      b => b.notes && b.notes.get,
-      (b, a, ctx) => b.notes.get(a, ctx)
-    ),
     T(
       "remember",
-      "保存本工作目录的事实、假设、观察、失败路径、决策或产物。默认 hypothesis/unverified；" +
-        "fact 必须显式 status=verified 并提供验证证据；失败路径需写明适用条件。改变结论时通过 supersedes 关联旧记忆 ID，保留原始实验。",
+      "及时记录本任务后续执行需要复用的关键进展，写入本工作目录的持久化记忆库，并更新 ledger.md。" +
+        "确认关键入口、参数规则或实验结果，发现有证据的失败条件，形成影响后续路线的重要待验证假设或决策，或验证最终产物后，应立即调用 remember；不要等到上下文压缩或任务结束。" +
+        "只记录影响后续决策的增量信息，避免重复记录普通工具输出。记忆按预算注入后续模型上下文，细节可用 recall 检索。" +
+        "支持 fact/hypothesis/observation/deadend/decision/artifact，默认 hypothesis/unverified；未知内容先作为假设或观察保存，不必等验证完成。" +
+        "fact 必须显式 status=verified 并提供验证证据；deadend 也必须 verified、有证据并填写 conditions，失败只在所列条件下适用。" +
+        "artifact 需提供路径及 hash/version。证据冲突时保留双方记录及环境；确认取代旧结论后才用 supersedes 关联旧记忆 ID。",
       {
         type: "object",
         properties: {
@@ -862,14 +832,17 @@ function toolTable() {
     ),
     T(
       "recall",
-      "检索**当前工作目录(任务)**的历史记忆库（remember 沉淀的各类型记录及验证状态，SQLite 持久化、**按目录隔离**）。" +
-        "本目录的记忆每轮已自动注入模型上下文；recall 用于按关键词/类型在**本目录**里精确查（不跨站点、不从全局捞）。" +
-        "想复用某个旧任务的记忆，就「打开目录」开回那个任务的目录——记忆随目录回来。",
+      "检索持久化记忆。开始任务、切换方向、准备重复实验或需要旧结论证据时调用。" +
+        "上下文只注入有预算上限的记忆摘要，细节通过 recall 查询。默认 scope=current，仅当前工作目录；" +
+        "跨目录需显式 scope=workspace 并给出 workspace，或 scope=all。结果包含来源目录、类型和验证状态；复用前核查适用环境。",
       {
         type: "object",
         properties: {
           query: { type: "string", description: "关键词子串（匹配记忆正文与证据，如 签名函数名 / 某指纹项 / nonce / 目标参数名）" },
           kind: { type: "string", enum: MEMORY_KINDS, description: "按记忆类型筛选，返回结果包含验证状态" },
+          status: { type: "string", enum: ["verified", "unverified", "rejected", "superseded"] },
+          scope: { type: "string", enum: ["current", "workspace", "all"], description: "默认 current，不自动跨目录" },
+          workspace: { type: "string", description: "scope=workspace 时必填，原任务工作目录绝对路径" },
           limit: { type: "integer", description: "最多返回几条，默认 20" },
         },
       },

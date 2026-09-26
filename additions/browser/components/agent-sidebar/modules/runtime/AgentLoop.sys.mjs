@@ -176,7 +176,7 @@ function _isProgress(name, env) {
     return false;
   }
   // 写盘/落盘类工具成功 = 前进
-  if (/^(addons_manage|scripts_save|fs_write|fs_copy|fs_mkdir|wasm_disasm|jsvmp_split_dispatcher|jsvmp_disassemble|js_trace|notes_add)$/.test(name)) {
+  if (/^(addons_manage|scripts_save|fs_write|fs_copy|fs_mkdir|wasm_disasm|jsvmp_split_dispatcher|jsvmp_disassemble|js_trace|remember)$/.test(name)) {
     return true;
   }
   // run_node/run_python：**只有脚本真的跑成功**才算前进。"进程跑起来了"(env.ok)≠"脚本逻辑成功"——

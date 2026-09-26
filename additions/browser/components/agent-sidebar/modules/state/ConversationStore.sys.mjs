@@ -404,6 +404,16 @@ export class ConversationStore {
     try { await this._save(); } catch (e) { t.unifiedContext = previous; throw e; }
   }
 
+  /** Durable completion extraction job/status; does not change context coverage. */
+  async setMemoryCompletion(id, value) {
+    const t = await this.getThread(id);
+    if (!t) throw new Error("conversation thread not found");
+    const previous = t.memoryCompletion;
+    t.memoryCompletion = structuredClone(value);
+    try { await this._save(); } catch (e) { t.memoryCompletion = previous; throw e; }
+    return structuredClone(t.memoryCompletion);
+  }
+
   /** Persist aggregate token counters without changing conversation ordering. */
   async addThreadUsage(id, usage) {
     const d = await this._load();
