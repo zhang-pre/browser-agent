@@ -62,14 +62,14 @@ export class ScriptsBackend {
 
   /** 短名 → 完整 URL。Agent 常从 initiatorStack/scripts_list 拿到的是短名(如 index.Dy4x2G-f.js)，
    *  直接 fetch 短名会 "is not a valid URL"。这里按 basename 在**页面已加载脚本**里匹配回完整 URL。 */
-  async _resolveUrl(url) {
+  async _resolveUrl(url, ctx) {
     if (/^(https?|data|blob|file|chrome|resource|moz-extension):/i.test(url)) {
       return url; // 已是完整 URL/可 fetch 的协议
     }
     const base = String(url).split(/[\\/]/).pop();
     let urls = [];
     try {
-      const r = await this.list(); // 页面已加载脚本(含 performance 资源里的动态 import chunk)
+      const r = await this.list({}, ctx); // 页面已加载脚本(含 performance 资源里的动态 import chunk)
       urls = Array.isArray(r?.urls) ? r.urls : [];
     } catch {
       /* 页面取不到就走下面的报错 */
@@ -97,7 +97,7 @@ export class ScriptsBackend {
   }
 
   /** 枚举当前页面加载的脚本 URL。 */
-  async list() {
+  async list(_args, ctx) {
     if (!this.page) {
       throw new Error("ScriptsBackend 需要 page backend");
     }
@@ -105,7 +105,7 @@ export class ScriptsBackend {
       expression:
         "Array.from(new Set(Array.from(document.scripts).map(s=>s.src).filter(Boolean)" +
         ".concat(performance.getEntriesByType('resource').filter(e=>e.initiatorType==='script'||/\\.js(\\?|$)/.test(e.name)).map(e=>e.name))))",
-    });
+    }, ctx);
     const urls = Array.isArray(r?.value) ? r.value : [];
     return { ok: true, count: urls.length, urls };
   }
@@ -120,7 +120,7 @@ export class ScriptsBackend {
     if (!url) {
       throw new Error("url required");
     }
-    url = await this._resolveUrl(url); // 短名 → 完整 URL（避免 "is not a valid URL"）
+    url = await this._resolveUrl(url, ctx); // 短名 → 完整 URL（避免 "is not a valid URL"）
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 8000); // 单个 8s 超时
     let resp;
@@ -243,8 +243,8 @@ export class ScriptsBackend {
   }
 
   /** 抓当前页面所有外部脚本到语料目录（并发，避免大站 191 脚本串行超时）。 */
-  async captureAll({ concurrency = 12 } = {}) {
-    const { urls } = await this.list();
+  async captureAll({ concurrency = 12 } = {}, ctx) {
+    const { urls } = await this.list({}, ctx);
     const saved = [];
     const failed = [];
     let idx = 0;
@@ -252,7 +252,7 @@ export class ScriptsBackend {
       while (idx < urls.length) {
         const u = urls[idx++];
         try {
-          const r = await this.save({ url: u });
+          const r = await this.save({ url: u }, ctx);
           saved.push({ url: u, path: r.path, bytes: r.bytes });
         } catch (e) {
           failed.push({ url: u, error: String((e && e.message) || e) });

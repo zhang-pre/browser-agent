@@ -16,6 +16,7 @@ export class LedgerBackend {
   constructor({ workspace } = {}) {
     this._workspace = workspace || null;
     this._conn = null;
+    this._mirrors = new Map();
     this._opening = null;
     this._closing = null;
     this._shutdownClient = null;
@@ -120,7 +121,7 @@ export class LedgerBackend {
   currentSite(ctx) {
     try {
       const win = agentWin(ctx);
-      const uri = win && win.gBrowser && win.gBrowser.selectedBrowser && win.gBrowser.selectedBrowser.currentURI;
+      const uri = ctx?.browser?.currentURI || (win && win.gBrowser && win.gBrowser.selectedBrowser && win.gBrowser.selectedBrowser.currentURI);
       const host = uri && uri.host;
       if (!host) {
         return "";
@@ -166,7 +167,15 @@ export class LedgerBackend {
     }).filter(Boolean).join("\n\n");
   }
 
-  async _renderMd(ctx) {
+  _renderMd(ctx) {
+    const key = ctx?.workspaceRoot;
+    const operation = (this._mirrors.get(key) || Promise.resolve()).catch(() => {}).then(() => this._writeMirror(ctx));
+    this._mirrors.set(key, operation);
+    operation.finally(() => { if (this._mirrors.get(key) === operation) this._mirrors.delete(key); }).catch(() => {});
+    return operation;
+  }
+
+  async _writeMirror(ctx) {
     if (!ctx?.workspaceRoot) return;
     const body = "# 任务记忆（SQLite）\n\n" + this._format(await this._contextRows(ctx)) + "\n";
     await IOUtils.writeUTF8(PathUtils.join(ctx.workspaceRoot, MD), body);

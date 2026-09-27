@@ -142,6 +142,7 @@ export class AgentTurnOrchestrator {
       workspaceRoot: context.workspaceRoot || null,
       hostContext: context.hostContext || null,
       signal: context.abortController.signal,
+      onUnsafeExecution: () => context.abortController.abort(),
     });
     context.client = this.createClient({
       config: this.configStore,

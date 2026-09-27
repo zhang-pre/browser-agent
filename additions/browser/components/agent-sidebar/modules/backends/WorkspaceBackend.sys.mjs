@@ -765,41 +765,26 @@ export class WorkspaceBackend {
     }
     let output = "";
     let capped = false;
+    let exitCode = null;
     try {
-      let chunk;
-      while ((chunk = await proc.stdout.readString())) {
+      for (let chunk; (chunk = await proc.stdout.readString()); ) {
         output += chunk;
         if (output.length > OUT_CAP) {
           output = output.slice(0, OUT_CAP) + "\n…（输出已截断）";
           capped = true;
-          try {
-            proc.kill();
-          } catch {
-            /* ignore */
-          }
+          proc.kill();
           break;
         }
       }
-    } finally {
-      if (timer && T && T.clearTimeout) {
-        T.clearTimeout(timer);
-      }
-    }
-    let exitCode = null;
-    try {
       ({ exitCode } = await proc.wait());
-    } catch {
-      /* killed */
+      return { exitCode, timedOut, capped, output, aborted };
+    } finally {
+      if (timer && T?.clearTimeout) T.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      try { proc.kill(); } catch {}
+      try { await proc.wait(); } catch {}
+      _runningProcs.delete(proc);
     }
-    _runningProcs.delete(proc); // 已退出 → 取消登记
-    if (signal) {
-      try {
-        signal.removeEventListener("abort", onAbort);
-      } catch {
-        /* ignore */
-      }
-    }
-    return { exitCode, timedOut, capped, output, aborted };
   }
 
   async _run(kind, { code, file, args = [], timeoutMs = 30000 } = {}, ctx) {

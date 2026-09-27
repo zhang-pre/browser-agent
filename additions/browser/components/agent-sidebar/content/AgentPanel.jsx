@@ -909,10 +909,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         // run() 返回 Promise；同步启动后由常驻 session 自己收尾。catch 防止启动前异常成为未处理 rejection。
         void session.run(tid, { systemPrompt: sys, dynamicContext: dynamicParts.join("\n\n"), convo, confirmMode, assist: effMode === "assist", maxRounds: 80, maxPerTool: 40,
           // 工作目录随会话注入到每条工具调用的 ctx，WorkspaceBackend 优先使用 ctx.workspaceRoot，
-          // 实现多窗口/多会话并发时各自操作各自的目录、互不干扰。
+          // 环境准入门禁会核对目录占用；一个 Firefox 进程只服务一个会话。
           workspaceRoot: workspaceDir || null,
           // Runtime 只接收不透明 hostContext；Firefox Host 再将它适配为 backend 的 ctx.win。
-          // topChromeWindow 不随焦点变化，两个窗口并发时不会把工具打到另一个窗口。
+          // 首次准入时绑定此窗口和标签页；并行任务须使用独立 Firefox 进程。
           hostContext: {
             win:
               (typeof window !== "undefined" &&
@@ -920,7 +920,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
                 window.browsingContext.topChromeWindow) ||
               null,
           },
-        }).catch(e => setError((e && e.message) || String(e)));
+        }).catch(e => { setError((e && e.message) || String(e)); setBusy(false); });
       } else {
         // 无 session 兜底（不跨重载）：直接单模型 chat。
         setBusy(true);

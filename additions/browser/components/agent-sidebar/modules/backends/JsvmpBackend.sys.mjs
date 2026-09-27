@@ -523,7 +523,7 @@ export class JsvmpBackend {
 
   /** 把 trace 文件镜像到 <工作目录>/jsvmp/，让 trace 缓存落在用户打开的目录下。
    *  size+mtime 相同则跳过，避免重复拷贝大文件。返回目标路径或 null。 */
-  async _relayToWorkspace(f) {
+  async _relayToWorkspace(f, ctx) {
     try {
       const root = this._getWorkspaceRoot && this._getWorkspaceRoot(ctx);
       if (!root || !f) {
@@ -557,60 +557,19 @@ export class JsvmpBackend {
   }
 
   async _findTrace(ctx) {
-    if (this._fixed) {
-      return this._fixed;
-    }
-    const env = Services.env || Cc["@mozilla.org/process/environment;1"]?.getService(Ci.nsIEnvironment);
-    const fromEnv = safe(() => env && env.get("MOZ_JSVMP_TRACE_FILE"));
-    if (fromEnv) {
-      return fromEnv;
-    }
-    let files = [];
-    try {
-      files = await IOUtils.getChildren(traceDir());
-    } catch {
-      return null;
-    }
-    // 只认真正的 NDJSON trace 文件；**排除控制文件 .ctl**（它同样以 PREFIX 开头，
-    // 若被当成 trace 文件，start 刚写完 ctl 它就成了"最新"，query 会去读它 → 读不到数据）。
-    const cands = files.filter(f => {
-      const n = PathUtils.filename(f);
-      return n.startsWith(PREFIX) && n.includes(".ndjson") && !n.endsWith(".ctl");
-    });
-    if (!cands.length) {
-      return null;
-    }
-    // 关键：trace 文件按进程 pid 分文件（`...ndjson.<pid>`）。页面脚本（目标站点的 JS）跑在
-    // **内容进程**，父进程(chrome JS)只会产生 resource://gre / chrome:// 噪声。
-    // 优先选「当前标签页内容进程」那份，否则永远读到父进程噪声、抓不到网页字节码。
+    if (this._fixed && !ctx?.threadId) return this._fixed;
     const pid = currentContentPid(ctx);
-    if (pid) {
-      const hit = cands.find(f => PathUtils.filename(f).endsWith("." + pid));
-      if (hit) {
-        return hit;
-      }
-    }
-    // 退回最新的一份
-    let best = null;
-    let bestT = -1;
-    for (const f of cands) {
-      try {
-        const s = await IOUtils.stat(f);
-        const t = s.lastModified || 0;
-        if (t > bestT) {
-          bestT = t;
-          best = f;
-        }
-      } catch {}
-    }
-    return best;
+    if (!pid) return null;
+    const base = Services.env.get("MOZ_JSVMP_TRACE_FILE") || PathUtils.join(traceDir(), "firefox-reverse-jsvmp-b.ndjson");
+    const path = base + "." + pid;
+    return await IOUtils.exists(path) ? path : null;
   }
 
   async status(_args, ctx) {
     const f = await this._findTrace(ctx);
     const pid = currentContentPid(ctx);
     const ctlBase = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.ctl");
-    const ctlPath = pid ? ctlBase + "." + pid : ctlBase;
+    const ctlPath = Services.env.get("MOZ_JSVMP_TRACE_CTL") || (pid ? ctlBase + "." + pid : null);
     let tracing = false;
     let ctlExists = false;
     try {
@@ -733,7 +692,7 @@ export class JsvmpBackend {
     }
     out.reverse(); // 收集时是尾→头，反转回时间顺序（旧→新）
     // 把 trace 镜像到工作目录（若已设），让缓存落在用户打开的目录下。
-    const workspaceCopy = await this._relayToWorkspace(f);
+    const workspaceCopy = await this._relayToWorkspace(f, ctx);
     return {
       ok: true,
       traceFile: f,
@@ -747,7 +706,7 @@ export class JsvmpBackend {
 
   /** 运行期 dump 配置文件路径（按当前标签内容进程 pid 区分，只配该进程）。 */
   _dumpPath(pid) {
-    return PathUtils.join(traceDir(), "firefox-reverse-jsvmp.dump." + pid);
+    return (Services.env.get("MOZ_JSVMP_DUMP_CTL") || PathUtils.join(traceDir(), "firefox-reverse-jsvmp.dump")) + "." + pid;
   }
 
   /**
@@ -806,7 +765,8 @@ export class JsvmpBackend {
     // per-PID ctl：每个内容进程（标签页/会话）独享自己的控制文件，与 C++ MaybePollControlFile 一致。
     const CTL_BASE = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.ctl");
     const _pid = currentContentPid(ctx);
-    const CTL = _pid ? CTL_BASE + "." + _pid : CTL_BASE;
+    if (!_pid) throw new Error("无法确定任务内容进程，拒绝修改 trace 控制文件");
+    const CTL = Services.env.get("MOZ_JSVMP_TRACE_CTL") || CTL_BASE + "." + _pid;
     const dumpCfg = { actions, col, pc, env, depth, limit, skip, maxarr, vpcPc, vpcLimit };
     if (action === "start") {
       // 过滤按脚本"名"子串匹配：传完整 URL 时自动取文件名（去掉查询串/路径），否则匹配不上→会全量 trace。
@@ -889,7 +849,7 @@ export class JsvmpBackend {
       let workspaceCopy = null;
       try {
         const f = await this._findTrace(ctx);
-        workspaceCopy = await this._relayToWorkspace(f);
+        workspaceCopy = await this._relayToWorkspace(f, ctx);
       } catch {
         /* ignore */
       }
@@ -906,7 +866,7 @@ export class JsvmpBackend {
           note: "无法确定当前标签的内容进程（先打开/聚焦目标页再 clear）。",
         };
       }
-      const CLR = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.clear." + pid);
+      const CLR = (Services.env.get("MOZ_JSVMP_TRACE_CLEAR") || PathUtils.join(traceDir(), "firefox-reverse-jsvmp.clear")) + "." + pid;
       await IOUtils.writeUTF8(CLR, String(Date.now()));
       // 等内容进程消费（它只在执行 JS 时轮询）。以"请求文件被删除"为已清空的确证信号。
       const { setTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
@@ -1094,6 +1054,7 @@ function safe(fn) {
 /** 当前标签页内容进程的 OS pid（页面脚本的 trace 文件名后缀就是它）。 */
 function currentContentPid(ctx) {
   try {
+    if (ctx?.browser) return ctx.browser.browsingContext?.currentWindowGlobal?.osPid || null;
     const win = agentWin(ctx);
     const wgp =
       win &&

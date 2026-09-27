@@ -24,6 +24,7 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
 EXTRA_JS_MODULES.agentsidebar.host += [
     "modules/host/AgentSession.sys.mjs",
     "modules/host/FirefoxAgentRuntimeHost.sys.mjs",
+    "modules/host/WorkspaceClaims.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.llm += [
@@ -48,6 +49,7 @@ EXTRA_JS_MODULES.agentsidebar.runtime += [
     "modules/runtime/AgentRuntimeCore.sys.mjs",
     "modules/runtime/AgentRuntimePorts.sys.mjs",
     "modules/runtime/AgentTurnOrchestrator.sys.mjs",
+    "modules/runtime/WorkerLease.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.state += [

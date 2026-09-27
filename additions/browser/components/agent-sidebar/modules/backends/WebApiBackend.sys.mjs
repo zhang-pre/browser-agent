@@ -19,7 +19,6 @@ function traceDir() {
   }
   return "/tmp";
 }
-const PREFIX = "firefox-reverse-webapi";
 
 function agentWin(ctx) {
   try { const w = ctx && ctx.win; if (w && w.gBrowser && !w.closed) return w; } catch {}
@@ -35,12 +34,12 @@ export class WebApiBackend {
   /**
    * 当前内容进程的 per-PID ctl 文件路径（与 C++ MaybePoll 里保持一致）。
    * 每个标签页/内容进程独享自己的 ctl，多会话并行 trace 互不覆盖。
-   * 若取不到 pid（无活跃标签页）回退到 CTL_BASE（向下兼容）。
+   * 环境变量覆盖值是完整路径（与原生实现一致）；默认路径才带 PID。
    */
   _ctlPath(ctx) {
     const pid = currentContentPid(ctx);
-    const ctlBase = PathUtils.join(traceDir(), "firefox-reverse-webapi.ctl");
-    return pid ? ctlBase + "." + pid : ctlBase;
+    if (!pid) throw new Error("无法确定任务内容进程，拒绝修改 trace 控制文件");
+    return Services.env.get("MOZ_WEBAPI_TRACE_CTL") || PathUtils.join(traceDir(), "firefox-reverse-webapi.ctl." + pid);
   }
 
   /** 当前工作目录根（未设则 null）。 */
@@ -107,40 +106,11 @@ export class WebApiBackend {
   }
 
   async _findTrace(ctx) {
-    let files = [];
-    try {
-      files = await IOUtils.getChildren(traceDir());
-    } catch {
-      return null;
-    }
-    const cands = files.filter(f => {
-      const n = PathUtils.filename(f);
-      return n.startsWith(PREFIX) && n.includes(".ndjson") && !n.endsWith(".ctl");
-    });
-    if (!cands.length) {
-      return null;
-    }
-    // 页面脚本跑在内容进程；优先选当前标签内容进程那份，否则取最新。
     const pid = currentContentPid(ctx);
-    if (pid) {
-      const hit = cands.find(f => PathUtils.filename(f).endsWith("." + pid));
-      if (hit) {
-        return hit;
-      }
-    }
-    let best = null;
-    let bestT = -1;
-    for (const f of cands) {
-      try {
-        const s = await IOUtils.stat(f);
-        const t = s.lastModified || 0;
-        if (t > bestT) {
-          bestT = t;
-          best = f;
-        }
-      } catch {}
-    }
-    return best;
+    if (!pid) return null;
+    const base = Services.env.get("MOZ_WEBAPI_TRACE_FILE") || PathUtils.join(traceDir(), "firefox-reverse-webapi.ndjson");
+    const path = base + "." + pid;
+    return await IOUtils.exists(path) ? path : null;
   }
 
   async status(_args, ctx) {
@@ -437,6 +407,7 @@ export class WebApiBackend {
 /** 当前标签页内容进程的 OS pid（页面脚本的 trace 文件名后缀就是它）。 */
 function currentContentPid(ctx) {
   try {
+    if (ctx?.browser) return ctx.browser.browsingContext?.currentWindowGlobal?.osPid || null;
     const win = agentWin(ctx);
     const wgp =
       win &&

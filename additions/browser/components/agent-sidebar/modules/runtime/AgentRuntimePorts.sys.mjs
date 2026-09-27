@@ -68,6 +68,7 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
 
 /**
  * @typedef {object} AgentRuntimeToolsPort
+ * @property {object|null} [admission] Optional host-wide worker lease shared by all entry points.
  * @property {function(): AgentRuntimeRouterPort} getRouter
  * @property {function(): AgentRuntimeBackendsPort} getBackends
  * @property {function(object): object} createContext
@@ -273,6 +274,7 @@ export function defineAgentRuntimePorts(input) {
           : bound(llm, "isVisionModel"),
     }),
     tools: Object.freeze({
+      admission: tools.admission || null,
       getRouter: bound(tools, "getRouter"),
       getBackends: bound(tools, "getBackends"),
       createContext: bound(tools, "createContext"),

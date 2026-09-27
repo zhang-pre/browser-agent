@@ -2351,6 +2351,9 @@ export class EnvironmentBackend {
       MOZ_WEBAPI_TRACE_FILE: PathUtils.join(env.traceDir, "webapi.ndjson"),
       MOZ_WEBAPI_TRACE_CTL: PathUtils.join(env.controlDir, "webapi.ctl"),
       MOZ_JSVMP_TRACE_FILE: PathUtils.join(env.traceDir, "jsvmp.ndjson"),
+      MOZ_JSVMP_TRACE_CTL: PathUtils.join(env.controlDir, "jsvmp.ctl"),
+      MOZ_JSVMP_DUMP_CTL: PathUtils.join(env.controlDir, "jsvmp.dump"),
+      MOZ_JSVMP_TRACE_CLEAR: PathUtils.join(env.controlDir, "jsvmp.clear"),
       MOZ_FRX_HIDE_REMOTE_CONTROL_CUE: "1",
       MOZ_MARIONETTE: "1",
       MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS: JSON.stringify({ "marionette.port": marionettePort }),
@@ -3175,8 +3178,9 @@ export class EnvironmentBackend {
         arguments: ["-0", String(pid)],
         stderr: "stdout",
       });
+      const output = await this._readProcessOutput(proc);
       const r = await proc.wait();
-      return r.exitCode === 0 ? PROCESS_ALIVE : PROCESS_DEAD;
+      return r.exitCode === 0 ? PROCESS_ALIVE : /No such process/.test(output) ? PROCESS_DEAD : PROCESS_UNKNOWN;
     } catch {
       return PROCESS_UNKNOWN;
     }

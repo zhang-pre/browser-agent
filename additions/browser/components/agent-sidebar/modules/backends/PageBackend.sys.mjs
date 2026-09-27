@@ -291,6 +291,11 @@ function agentWin(ctx) {
 }
 
 function activeBrowser(ctx) {
+  ctx?.assertSafe?.();
+  if (ctx?.browser) {
+    if (!ctx.browser.isConnected) throw new Error("任务标签页已关闭，请重启环境");
+    return ctx.browser;
+  }
   const win = agentWin(ctx);
   if (!win || !win.gBrowser) {
     throw new Error("找不到浏览器窗口（请确保有打开的标签页）");
@@ -406,18 +411,21 @@ export class PageBackend {
     }
     let timer = null;
     let onAbort = null;
+    let timedOut = false;
     try {
       return await Promise.race([
         actor.sendQuery(name, data),
         new Promise((_, rej) => {
           timer = _setTimeout(
-            () =>
+            () => {
+              timedOut = true;
               rej(
                 new Error(
                   `actor「${name}」${Math.round(timeoutMs / 1000)}s 无响应已超时返回（避免卡死会话）。` +
                     `多半是内容进程繁忙、或 trace 的目标是**热路径函数**（每次请求都触发）——先 stop，再缩小 trace 范围 / 换非热路径目标。`
                 )
-              ),
+              );
+            },
             timeoutMs
           );
         }),
@@ -428,6 +436,9 @@ export class PageBackend {
           }
         }),
       ]);
+    } catch (error) {
+      if (timedOut) ctx?.onUnsafeExecution?.("页面工具超时：" + error.message);
+      throw error;
     } finally {
       if (timer) {
         _clearTimeout(timer);
@@ -638,7 +649,10 @@ export class PageBackend {
         const { setTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
         setTimeout(() => {
           try {
-            this.armNetStack(undefined, ctx);
+            if (this._net?._on && !ctx?.signal?.aborted) {
+              ctx?.assertSafe?.();
+              void this.armNetStack(undefined, ctx).catch(() => {});
+            }
           } catch {}
         }, 1200);
       } catch {}

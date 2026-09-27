@@ -90,7 +90,7 @@ export class ToolRouter {
    * @param {object} [ctx]  透传给 handler 的运行期上下文（如 tabId/signal）
    * @returns {Promise<{ok:boolean,data?:any,error?:string,meta?:object}>}
    */
-  async dispatch(name, args, ctx = {}) {
+  async dispatch(name, args, ctx = {}, { maxChars = this.maxChars } = {}) {
     const tool = this._tools.get(name);
     if (!tool) {
       return { ok: false, error: `unknown tool "${name}"` };
@@ -100,8 +100,11 @@ export class ToolRouter {
       return { ok: false, error: `missing required param(s): ${missing.join(", ")}` };
     }
     try {
+      ctx.assertSafe?.();
+      ctx.assertToolAllowed?.(name);
       const data = await tool.handler(args || {}, ctx);
-      return this._envelope(data);
+      if (data?.timedOut) ctx.onUnsafeExecution?.("工具执行超时，需要重启环境");
+      return this._envelope(data, maxChars);
     } catch (e) {
       return { ok: false, error: e && e.message ? e.message : String(e) };
     }
@@ -117,7 +120,7 @@ export class ToolRouter {
   /** 包装成功信封 + 按 maxChars 截断超大结果。
    * 例外：`data._media`（图像等二进制，如截图 dataURL）抽到信封顶层 `media`，
    * **不参与文本截断、也不进模型文本上下文**（由 AgentLoop 决定喂给视觉模型 / 显示给用户）。 */
-  _envelope(data) {
+  _envelope(data, maxChars = this.maxChars) {
     let media;
     if (data && typeof data === "object" && Array.isArray(data._media)) {
       media = data._media;
@@ -132,10 +135,10 @@ export class ToolRouter {
       // 含循环引用/不可序列化 → 退化为字符串
       return attach({ ok: true, data: String(data) });
     }
-    if (str !== undefined && str.length > this.maxChars) {
+    if (str !== undefined && str.length > maxChars) {
       return attach({
         ok: true,
-        data: { _truncated: true, total_chars: str.length, preview: str.slice(0, this.maxChars) },
+        data: { _truncated: true, total_chars: str.length, preview: str.slice(0, maxChars) },
         meta: { truncated: true },
       });
     }

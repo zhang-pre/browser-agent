@@ -47,7 +47,12 @@ export function createAgentRuntime(inputPorts) {
     ports,
     runAgentTurn,
   });
+  const admission = ports.tools.admission;
   const runLog = [];
+  const boundOptions = options => ({ ...options,
+    workspaceRoot: admission?.owner?.workspaceRoot || options.workspaceRoot,
+    systemPrompt: (options.systemPrompt || "") + (admission ? "\n【专用环境限制】一个 Firefox 进程只服务本会话。仅在绑定的工作目录内修改任务文件；不得更改其他任务目录或共享 Git 引用。不得启动脱离当前工具生命周期的后台进程、守护服务或 detached 子进程。需要此类服务时先停止并向用户说明。" : ""),
+  });
   let disposed = false;
   let unregisterShutdown = null;
 
@@ -62,6 +67,7 @@ export function createAgentRuntime(inputPorts) {
       return false;
     }
     disposed = true;
+    if (admission?.busy) admission.poison("运行时已关闭");
     runtimeCore.abortAll();
     const unregister = unregisterShutdown;
     unregisterShutdown = null;
@@ -77,6 +83,21 @@ export function createAgentRuntime(inputPorts) {
 
   const runtime = {
     version: ports.version,
+    workerState() { return admission?.snapshot() || null; },
+    async prepare(threadId, options) {
+      ensureActive();
+      if (!admission) throw new Error("Host does not support worker admission");
+      return admission.prepare(threadId, options);
+    },
+    assertPreparation(token) {
+      if (!admission) throw new Error("Host does not support worker admission");
+      admission.assertPreparation(token);
+    },
+    preparationContext(token) {
+      this.assertPreparation(token);
+      return createToolContext(ports, { workspaceRoot: admission.owner.workspaceRoot, hostContext: { win: admission.owner.win } });
+    },
+    cancelPreparation(token) { admission?.cancelPreparation(token); },
 
     isRunning(threadId) {
       return runtimeCore.isRunning(threadId);
@@ -109,16 +130,21 @@ export function createAgentRuntime(inputPorts) {
           error:
             `agent 正在运行（${running.map(item => item.id).join(", ")}）——raw 工具直调已暂时禁用：` +
             "它与运行中的 agent 共享同一工具环境，并发会相互干扰。" +
-            "请先等待当前 agent 停止或主动停止，再直调工具。",
+            "请等待本轮自然结束；主动停止后必须重启环境。",
           running,
         };
       }
-      const context = createToolContext(ports, {
-        workspaceRoot: options.workspaceRoot || null,
-        hostContext: options.hostContext || null,
-        signal: null,
-      });
-      return await getRouter().dispatch(name, args || {}, context);
+      let token;
+      try {
+        token = admission?.raw(name);
+        const context = createToolContext(ports, {
+          workspaceRoot: options.workspaceRoot || null,
+          hostContext: options.hostContext || null,
+          signal: null,
+        });
+        return await getRouter().dispatch(name, args || {}, context);
+      } catch (error) { return { ok: false, error: String(error.message || error) }; }
+      finally { admission?.finish(token); }
     },
 
     acquireThread(candidateIds, owner) {
@@ -155,12 +181,23 @@ export function createAgentRuntime(inputPorts) {
     },
 
     stop(threadId) {
+      if (admission?.busy && (admission.owner?.threadId === threadId || admission.busy.threadId === threadId)) admission.poison("任务被停止；旧页面操作可能尚未退出");
       const taskCompleted = runtimeCore.getState(threadId)?.taskCompleted;
       if (runtimeCore.abortThread(threadId) && !taskCompleted) {
         void ports.conversations
           .setThreadTurnStatus(threadId, "cancelled")
           .catch(() => {});
       }
+    },
+
+    async start(threadId, options = {}) {
+      ensureActive();
+      const token = await admission?.begin(threadId, options);
+      ensureActive();
+      runLog.push({ threadId, at: ports.clock.now(), convoLen: options.convo?.length ?? -1 });
+      void turnOrchestrator.run(threadId, boundOptions(options))
+        .finally(() => admission?.finish(token)).catch(error => console.error("Agent run failed", threadId, error));
+      return { ok: true, started: true, tid: threadId };
     },
 
     async run(threadId, options = {}) {
@@ -170,7 +207,11 @@ export function createAgentRuntime(inputPorts) {
         at: ports.clock.now(),
         convoLen: Array.isArray(options.convo) ? options.convo.length : -1,
       });
-      return await turnOrchestrator.run(threadId, options);
+      const token = await admission?.begin(threadId, options);
+      try {
+        ensureActive();
+        return await turnOrchestrator.run(threadId, boundOptions(options));
+      } finally { admission?.finish(token); }
     },
 
     getRunLog() {

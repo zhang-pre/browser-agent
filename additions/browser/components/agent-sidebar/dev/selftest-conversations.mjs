@@ -67,9 +67,10 @@ const retiredBundle = structuredClone(bundle);
 retiredBundle.conversation.mode = "supervised";
 const retiredImport = await s.importThread(JSON.stringify(retiredBundle));
 ok(retiredImport.mode === null && retiredImport.messages.length === 2, "旧双模型导入保留消息但不再启用旧模式");
+const t1Snapshot = await s.getThread(t1.id);
 const savedIOUtils = globalThis.IOUtils;
 globalThis.IOUtils = {
-  readJSON: async () => ({ threads: [{ ...t1, mode: "supervised" }] }),
+  readJSON: async () => ({ threads: [{ ...t1Snapshot, mode: "supervised" }] }),
 };
 try {
   const reopened = new ConversationStore({ memoryOnly: false, path: "legacy-conversations.json" });
@@ -82,9 +83,9 @@ try {
 const savedLegacyIO = globalThis.IOUtils;
 globalThis.IOUtils = {
   readJSON: async () => ({ threads: [{
-    ...t1,
+    ...t1Snapshot,
     unifiedContext: undefined,
-    messages: [...t1.messages, { role: "user", content: "继续" }],
+    messages: [...t1Snapshot.messages, { role: "user", content: "继续" }],
     contextProjection: {
       version: 1, summary: "旧版已验证状态", cutoff: 2, sourceCount: 2,
       createdAt: 1, updatedAt: 2,

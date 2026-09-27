@@ -297,7 +297,7 @@ export async function runAgentTurn(p) {
 
   const resultCap = 12000;
   // Save the full tool envelope before projecting a bounded model preview.
-  try { router.maxChars = Number.MAX_SAFE_INTEGER; } catch {}
+
 
   const emit = ev => {
     try {
@@ -572,10 +572,10 @@ export async function runAgentTurn(p) {
         emit({ type: "confirm_result", name, id: tc.id, approved: !!approved });
         approved = approved && !signal?.aborted && !hasSteering();
         env = approved
-          ? await router.dispatch(name, args, toolCtx)
+          ? await router.dispatch(name, args, toolCtx, { maxChars: Number.MAX_SAFE_INTEGER })
           : { ok: false, error: "user denied tool execution", denied: true };
       } else {
-        env = await router.dispatch(name, args, toolCtx);
+        env = await router.dispatch(name, args, toolCtx, { maxChars: Number.MAX_SAFE_INTEGER });
       }
 
       allToolCalls.push({ name, args, env, id: tc.id });

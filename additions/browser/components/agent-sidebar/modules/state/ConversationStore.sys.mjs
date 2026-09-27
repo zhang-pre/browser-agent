@@ -107,8 +107,46 @@ export class ConversationStore {
     this._mem = null; // { threads: [...] }
     this._path = opts.path || null;
     this._memoryOnly = opts.memoryOnly ?? !hasIO();
-    this._saveChain = Promise.resolve();
+    this._operations = Promise.resolve();
+    this._loading = null;
   }
+
+  _enqueue(operation, mutate = false) {
+    const pending = this._operations.catch(() => {}).then(async () => {
+      const previous = await this._load();
+      if (mutate) this._mem = structuredClone(previous);
+      try { return structuredClone(await operation()); }
+      catch (error) { if (mutate) this._mem = previous; throw error; }
+    });
+    this._operations = pending;
+    return pending;
+  }
+
+  listThreads(...args) { return this._enqueue(() => this._impl_listThreads(...args), false); }
+  getThread(...args) { return this._enqueue(() => this._impl_getThread(...args), false); }
+  getModelMessages(...args) { return this._enqueue(() => this._impl_getModelMessages(...args), false); }
+  createThread(...args) { return this._enqueue(() => this._impl_createThread(...args), true); }
+  setThreadWorkspace(...args) { return this._enqueue(() => this._impl_setThreadWorkspace(...args), true); }
+  setThreadMode(...args) { return this._enqueue(() => this._impl_setThreadMode(...args), true); }
+  setThreadEnvironment(...args) { return this._enqueue(() => this._impl_setThreadEnvironment(...args), true); }
+  setThreadModelStrategy(...args) { return this._enqueue(() => this._impl_setThreadModelStrategy(...args), true); }
+  setThreadTurnStatus(...args) { return this._enqueue(() => this._impl_setThreadTurnStatus(...args), true); }
+  consumeCancellationBoundary(...args) { return this._enqueue(() => this._impl_consumeCancellationBoundary(...args), true); }
+  appendMessage(...args) { return this._enqueue(() => this._impl_appendMessage(...args), true); }
+  appendContextEvents(...args) { return this._enqueue(() => this._impl_appendContextEvents(...args), true); }
+  getUnifiedContext(...args) { return this._enqueue(() => this._impl_getUnifiedContext(...args), false); }
+  commitUnifiedCompaction(...args) { return this._enqueue(() => this._impl_commitUnifiedCompaction(...args), true); }
+  commitUnifiedRewrite(...args) { return this._enqueue(() => this._impl_commitUnifiedRewrite(...args), true); }
+  markMemorySync(...args) { return this._enqueue(() => this._impl_markMemorySync(...args), true); }
+  setMemoryCompletion(...args) { return this._enqueue(() => this._impl_setMemoryCompletion(...args), true); }
+  addThreadUsage(...args) { return this._enqueue(() => this._impl_addThreadUsage(...args), true); }
+  renameThread(...args) { return this._enqueue(() => this._impl_renameThread(...args), true); }
+  deleteThread(...args) { return this._enqueue(() => this._impl_deleteThread(...args), true); }
+  exportThread(...args) { return this._enqueue(() => this._impl_exportThread(...args), false); }
+  exportThreadJSON(...args) { return this._enqueue(() => this._impl_exportThreadJSON(...args), false); }
+  exportThreadToFile(...args) { return this._enqueue(() => this._impl_exportThreadToFile(...args), false); }
+  importThread(...args) { return this._enqueue(() => this._impl_importThread(...args), true); }
+  importThreadFromFile(...args) { return this._enqueue(() => this._impl_importThreadFromFile(...args), true); }
 
   get isPersistent() {
     return !this._memoryOnly;
@@ -125,6 +163,12 @@ export class ConversationStore {
   }
 
   async _load() {
+    if (this._mem) return this._mem;
+    if (!this._loading) this._loading = this._readFile().finally(() => { this._loading = null; });
+    return this._loading;
+  }
+
+  async _readFile() {
     if (this._mem) {
       return this._mem;
     }
@@ -147,16 +191,12 @@ export class ConversationStore {
     if (this._memoryOnly) {
       return;
     }
-    const operation = this._saveChain.catch(() => {}).then(async () => {
-      const p = await this._filePath();
-      await IOUtils.writeJSON(p, this._mem, { tmpPath: p + ".tmp" });
-    });
-    this._saveChain = operation;
-    await operation;
+    const p = await this._filePath();
+    await IOUtils.writeJSON(p, this._mem, { tmpPath: p + ".tmp" });
   }
 
   /** 线程摘要列表（按更新时间倒序），不含 messages。 */
-  async listThreads() {
+  async _impl_listThreads() {
     const d = await this._load();
     return d.threads
       .map(t => ({
@@ -177,18 +217,18 @@ export class ConversationStore {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async getThread(id) {
+  async _impl_getThread(id) {
     const d = await this._load();
     return d.threads.find(t => t.id === id) || null;
   }
 
   /** Full UI history remains untouched; only the model-facing view may use a projection. */
-  async getModelMessages(id) {
-    const t = await this.getThread(id);
+  async _impl_getModelMessages(id) {
+    const t = await this._impl_getThread(id);
     return t ? projectUnifiedMessages(t.unifiedContext || createUnifiedContext(t.messages)) : [];
   }
 
-  async createThread(title = NEW_TITLE, workspace = null, mode = null) {
+  async _impl_createThread(title = NEW_TITLE, workspace = null, mode = null) {
     const d = await this._load();
     const now = nextTs();
     const t = {
@@ -213,7 +253,7 @@ export class ConversationStore {
   }
 
   /** 绑定/更新会话的工作目录。 */
-  async setThreadWorkspace(id, workspace) {
+  async _impl_setThreadWorkspace(id, workspace) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
@@ -225,7 +265,7 @@ export class ConversationStore {
   }
 
   /** 设置/更新会话执行模式（auto / assist）。按会话持久化。 */
-  async setThreadMode(id, mode) {
+  async _impl_setThreadMode(id, mode) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
@@ -237,7 +277,7 @@ export class ConversationStore {
   }
 
   /** 绑定/更新会话的浏览器环境。 */
-  async setThreadEnvironment(id, envId) {
+  async _impl_setThreadEnvironment(id, envId) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
@@ -249,7 +289,7 @@ export class ConversationStore {
   }
 
   /** 设置/更新会话的模型策略。 */
-  async setThreadModelStrategy(id, strategy) {
+  async _impl_setThreadModelStrategy(id, strategy) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
@@ -261,7 +301,7 @@ export class ConversationStore {
   }
 
   /** 记录最近一轮状态。手动取消只标记边界，不会影响正常运行或自动续跑。 */
-  async setThreadTurnStatus(id, status) {
+  async _impl_setThreadTurnStatus(id, status) {
     if (!TURN_STATUSES.has(status)) {
       throw new Error("invalid turn status: " + status);
     }
@@ -284,7 +324,7 @@ export class ConversationStore {
   }
 
   /** 下一条用户消息消费一次取消边界；返回 true 时调用方应注入“不自动恢复旧任务”的系统提示。 */
-  async consumeCancellationBoundary(id) {
+  async _impl_consumeCancellationBoundary(id) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t || t.cancellationPending !== true) {
@@ -297,7 +337,7 @@ export class ConversationStore {
   }
 
   /** 追加一条消息；首条 user 消息自动作为标题。 */
-  async appendMessage(id, msg) {
+  async _impl_appendMessage(id, msg) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t) {
@@ -332,7 +372,7 @@ export class ConversationStore {
   }
 
   /** Append model-visible execution events after a complete tool batch. */
-  async appendContextEvents(id, messages) {
+  async _impl_appendContextEvents(id, messages) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t) throw new Error("conversation thread not found: " + id);
@@ -348,14 +388,14 @@ export class ConversationStore {
     return { state: normalizeUnifiedContext(state), events };
   }
 
-  async getUnifiedContext(id) {
-    const t = await this.getThread(id);
+  async _impl_getUnifiedContext(id) {
+    const t = await this._impl_getThread(id);
     if (!t) throw new Error("conversation thread not found: " + id);
     return normalizeUnifiedContext(t.unifiedContext, t.messages);
   }
 
   /** Commit only against the snapshot and task-card version used by the summarizer. */
-  async commitUnifiedCompaction(id, plan, summary, metadata = {}) {
+  async _impl_commitUnifiedCompaction(id, plan, summary, metadata = {}) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t) throw new Error("conversation thread not found: " + id);
@@ -370,7 +410,7 @@ export class ConversationStore {
     return normalizeUnifiedContext(t.unifiedContext);
   }
 
-  async commitUnifiedRewrite(id, snapshot, summary, metadata = {}) {
+  async _impl_commitUnifiedRewrite(id, snapshot, summary, metadata = {}) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t) throw new Error("conversation thread not found: " + id);
@@ -386,8 +426,8 @@ export class ConversationStore {
   }
 
   /** Persist an outbox receipt; a crash before this write is safe to retry. */
-  async markMemorySync(id, version, error = "") {
-    const t = await this.getThread(id);
+  async _impl_markMemorySync(id, version, error = "") {
+    const t = await this._impl_getThread(id);
     if (!t) throw new Error("conversation thread not found");
     const previous = t.unifiedContext;
     const next = normalizeUnifiedContext(previous);
@@ -405,8 +445,8 @@ export class ConversationStore {
   }
 
   /** Durable completion extraction job/status; does not change context coverage. */
-  async setMemoryCompletion(id, value) {
-    const t = await this.getThread(id);
+  async _impl_setMemoryCompletion(id, value) {
+    const t = await this._impl_getThread(id);
     if (!t) throw new Error("conversation thread not found");
     const previous = t.memoryCompletion;
     t.memoryCompletion = structuredClone(value);
@@ -415,7 +455,7 @@ export class ConversationStore {
   }
 
   /** Persist aggregate token counters without changing conversation ordering. */
-  async addThreadUsage(id, usage) {
+  async _impl_addThreadUsage(id, usage) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (!t) {
@@ -426,7 +466,7 @@ export class ConversationStore {
     return t.usage;
   }
 
-  async renameThread(id, title) {
+  async _impl_renameThread(id, title) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
@@ -436,7 +476,7 @@ export class ConversationStore {
     }
   }
 
-  async deleteThread(id) {
+  async _impl_deleteThread(id) {
     const d = await this._load();
     const before = d.threads.length;
     d.threads = d.threads.filter(t => t.id !== id);
@@ -446,8 +486,8 @@ export class ConversationStore {
   }
 
   /** 生成可迁移的单会话包。不携带工作目录、环境绑定、进程状态或模型密钥。 */
-  async exportThread(id) {
-    const t = await this.getThread(id);
+  async _impl_exportThread(id) {
+    const t = await this._impl_getThread(id);
     if (!t) {
       throw new Error("conversation thread not found: " + id);
     }
@@ -468,15 +508,15 @@ export class ConversationStore {
     };
   }
 
-  async exportThreadJSON(id) {
-    return JSON.stringify(await this.exportThread(id), null, 2) + "\n";
+  async _impl_exportThreadJSON(id) {
+    return JSON.stringify(await this._impl_exportThread(id), null, 2) + "\n";
   }
 
-  async exportThreadToFile(id, path) {
+  async _impl_exportThreadToFile(id, path) {
     if (!hasIO()) {
       throw new Error("当前环境不支持写入会话文件");
     }
-    const json = await this.exportThreadJSON(id);
+    const json = await this._impl_exportThreadJSON(id);
     const byteLength = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(json).byteLength : json.length;
     if (byteLength > MAX_IMPORT_CHARS) {
       throw new Error("导出失败：当前单会话超过 10MB，请先精简超长消息");
@@ -486,7 +526,7 @@ export class ConversationStore {
   }
 
   /** 导入仅创建一条静止的新会话，不恢复 workspace/envId，也绝不自动执行历史内容。 */
-  async importThread(payload) {
+  async _impl_importThread(payload) {
     let data = payload;
     if (typeof payload === "string") {
       if (payload.length > MAX_IMPORT_CHARS) {
@@ -538,7 +578,7 @@ export class ConversationStore {
     return t;
   }
 
-  async importThreadFromFile(path) {
+  async _impl_importThreadFromFile(path) {
     if (!hasIO()) {
       throw new Error("当前环境不支持读取会话文件");
     }
@@ -546,7 +586,7 @@ export class ConversationStore {
     if (st.size > MAX_IMPORT_CHARS) {
       throw new Error("导入失败：文件超过 10MB");
     }
-    return this.importThread(await IOUtils.readUTF8(path));
+    return this._impl_importThread(await IOUtils.readUTF8(path));
   }
 }
 
