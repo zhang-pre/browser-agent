@@ -44,6 +44,10 @@ export class ToolRouter {
       description: spec.description || "",
       parameters: spec.parameters || { type: "object", properties: {} },
       handler: spec.handler,
+      sourceId: spec.sourceId,
+      mcp: spec.mcp,
+      getPolicy: spec.getPolicy,
+      approveAlways: spec.approveAlways,
       needsConfirm: !!spec.needsConfirm, // 改动型工具（执行 JS/导航/改包/落盘）需用户批准（A3 要求）
     });
     return this;
@@ -55,6 +59,38 @@ export class ToolRouter {
       this.register(s);
     }
     return this;
+  }
+
+  setPrepareHook(hook) { this._prepareHook = hook; return this; }
+  async prepare(ctx = {}) { await this._prepareHook?.(ctx); }
+
+  // Validate the entire replacement before modifying the live registry.
+  replaceSource(sourceId, specs) {
+    if (!sourceId) throw new Error("sourceId required");
+    const next = new ToolRouter({ maxChars: this.maxChars });
+    next._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
+    next.registerAll((specs || []).map(spec => ({ ...spec, sourceId })));
+    this._tools = next._tools;
+    return this;
+  }
+  removeSource(sourceId) {
+    this._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
+  }
+  snapshot() {
+    const copy = new ToolRouter({ maxChars: this.maxChars });
+    copy._tools = new Map(this._tools);
+    return copy;
+  }
+  getPermission(name) {
+    const tool = this._tools.get(name);
+    if (!tool?.mcp) return null;
+    return { mcp: tool.mcp, policy: tool.getPolicy?.() || "ask" };
+  }
+  async approveAlways(name) {
+    const tool = this._tools.get(name);
+    if (!tool?.mcp || !tool.approveAlways) throw new Error("Persistent approval unavailable");
+    if (this.getPermission(name)?.policy === "deny") throw new Error("MCP tool disabled or denied");
+    await tool.approveAlways();
   }
 
   has(name) {
@@ -94,6 +130,13 @@ export class ToolRouter {
     const tool = this._tools.get(name);
     if (!tool) {
       return { ok: false, error: `unknown tool "${name}"` };
+    }
+    if (ctx.signal?.aborted) return { ok: false, error: "Tool call cancelled" };
+    if (tool.mcp) {
+      const permission = this.getPermission(name);
+      if (permission.policy === "deny" || (permission.policy !== "allow" && ctx.mcpApproved !== name)) {
+        return { ok: false, error: "MCP tool requires authorization or is denied", denied: true };
+      }
     }
     const missing = this._missingRequired(tool.parameters, args);
     if (missing.length) {

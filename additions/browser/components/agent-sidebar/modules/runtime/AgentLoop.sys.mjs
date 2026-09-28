@@ -261,7 +261,7 @@ function _errSig(name, env) {
 export async function runAgentTurn(p) {
   const {
     client,
-    router,
+    router: liveRouter,
     messages,
     systemPrompt,
     dynamicContext,
@@ -280,6 +280,7 @@ export async function runAgentTurn(p) {
     getLedger, // 取任务账本注入块的回调(async→string)：每轮开头+每次压缩后刷新模型上下文，保留类型和验证状态
     confirm,
     autoApprove = false,
+    mcpAutoApprove = false,
     assist = false, // AI辅助逐阶段模式：无工具的纯文字回复=正常收尾（停下报告+给方向），不当 drift 逼它继续
     vision = false, // 模型是否支持看图：true 时把截图等图像作为 user 图片消息回喂
     journal, onContextAppend, onContextCommit, onContextRewrite, onValidateEvidence, onContextRefresh,
@@ -289,13 +290,23 @@ export async function runAgentTurn(p) {
   if (!client || typeof client.chat !== "function") {
     throw new Error("runAgentTurn: client.chat required");
   }
-  if (!router || typeof router.dispatch !== "function") {
+  if (!liveRouter || typeof liveRouter.dispatch !== "function") {
     throw new Error("runAgentTurn: router required");
   }
   if (!Array.isArray(messages)) {
     throw new Error("runAgentTurn: messages array required");
   }
 
+  const abortedResult = () => ({ content: "", rounds: 0, toolCalls: [], messages, stopReason: "aborted" });
+  if (signal?.aborted) return abortedResult();
+  try {
+    await liveRouter.prepare?.({ signal });
+  } catch (error) {
+    if (signal?.aborted) return abortedResult();
+    throw error;
+  }
+  if (signal?.aborted) return abortedResult();
+  const router = liveRouter.snapshot?.() || liveRouter;
   const resultCap = 12000;
   // Save the full tool envelope before projecting a bounded model preview.
   try { router.maxChars = Number.MAX_SAFE_INTEGER; } catch {}
@@ -555,6 +566,7 @@ export async function runAgentTurn(p) {
       // 改动型工具（page_eval/navigate/intercept/save/trace…）执行前征求用户批准（A3）。
       // 默认安全：需确认但既无 confirm 回调也没 autoApprove → 拒绝。
       let env;
+      const permission = router.getPermission?.(name);
       if (parseErr) {
         env = { ok: false, error: parseErr };
       } else if (repeatBlocked) {
@@ -565,19 +577,26 @@ export async function runAgentTurn(p) {
             `引擎已拒绝再次执行。**别重发同样的调用**：要么改参数（换 filter/换脚本/换 offset）、` +
             `要么换工具、要么换策略。若该策略确实走不通，登记带证据和适用条件的失败路径（deadend，status=verified，conditions），证据不足则记待验证假设，再换路线，别原地磨。`,
         };
-      } else if (router.needsConfirm(name)) {
+      } else if (permission?.policy === "deny") {
+        env = { ok: false, error: "MCP tool disabled or denied", denied: true };
+      } else if (permission ? permission.policy !== "allow" : router.needsConfirm(name)) {
         emit({ type: "confirm_request", name, args, id: tc.id });
-        let approved = autoApprove;
+        let approved = permission ? mcpAutoApprove : autoApprove;
         if (!approved && typeof confirm === "function") {
-          approved = await confirm({ name, args, id: tc.id });
+          const decision = await confirm({ name, args, id: tc.id, ...(permission ? { mcp: permission.mcp } : {}) });
+          approved = typeof decision === "object" ? decision?.approved === true : decision === true;
+          if (approved && decision?.always && permission && !signal?.aborted && !hasSteering()) {
+            try { await router.approveAlways(name); }
+            catch (error) { approved = false; emit({ type: "confirmation_error", name, error: String(error?.message || error) }); }
+          }
         }
         emit({ type: "confirm_result", name, id: tc.id, approved: !!approved });
         approved = approved && !signal?.aborted && !hasSteering();
         env = approved
-          ? await router.dispatch(name, args, toolCtx)
+          ? await router.dispatch(name, args, { ...toolCtx, signal, ...(permission ? { mcpApproved: name } : {}) })
           : { ok: false, error: "user denied tool execution", denied: true };
       } else {
-        env = await router.dispatch(name, args, toolCtx);
+        env = await router.dispatch(name, args, { ...toolCtx, signal });
       }
 
       allToolCalls.push({ name, args, env, id: tc.id });

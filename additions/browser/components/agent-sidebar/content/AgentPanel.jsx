@@ -1346,24 +1346,24 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       {pendingConfirm && (
         <div className="agent-confirm">
           <span className="agent-confirm__msg">
-            Agent 要调用工具 <b>{pendingConfirm.call.name}</b>，允许？
+            等待授权：Agent 要调用工具 <b>{pendingConfirm.call.name}</b>，允许？
           </span>
           <span className="agent-confirm__btns">
-            <button type="button" onClick={() => { pendingConfirm.resolve(true); setPendingConfirm(null); }}>批准</button>
+            <button type="button" onClick={() => { pendingConfirm.resolve(true); setPendingConfirm(null); }}>{pendingConfirm.call.mcp ? "仅允许本次" : "批准"}</button>
             <button type="button" onClick={() => { pendingConfirm.resolve(false); setPendingConfirm(null); }}>拒绝</button>
             <button
               type="button"
-              title="本次及以后都不再询问（关闭确认模式，可在设置里重新开启）"
+              title={pendingConfirm.call.mcp ? "仅在当前 profile 允许此 MCP 工具" : "关闭内置工具确认"}
               onClick={() => {
-                autoApproveRef.current = true; // 本回合后续工具不再询问
-                if (store && store.setConfirmTools) {
-                  store.setConfirmTools(false); // 持久关闭，下次启动也不问
+                if (!pendingConfirm.call.mcp) {
+                  autoApproveRef.current = true;
+                  store?.setConfirmTools?.(false);
                 }
-                pendingConfirm.resolve(true, true); // all=true → 引擎本轮后续工具自动批准
+                pendingConfirm.resolve(true, true);
                 setPendingConfirm(null);
               }}
             >
-              总是允许
+              {pendingConfirm.call.mcp ? "始终允许此工具" : "总是允许"}
             </button>
           </span>
         </div>

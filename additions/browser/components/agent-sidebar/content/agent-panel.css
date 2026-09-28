@@ -1669,7 +1669,9 @@ body {
 
 .settings-pane__field select,
 .settings-pane__field input[type="text"],
-.settings-pane__field input[type="password"] {
+.settings-pane__field input[type="password"],
+.settings-pane__field input[type="url"],
+.settings-pane__field textarea {
   font: inherit;
   font-weight: normal;
   font-size: calc(13px * var(--frx-font-scale, 1));

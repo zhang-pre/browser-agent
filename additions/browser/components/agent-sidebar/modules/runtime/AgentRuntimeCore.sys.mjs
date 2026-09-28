@@ -225,7 +225,7 @@ export class AgentRuntimeCore {
       lastUsage: state.lastUsage ? { ...state.lastUsage } : null,
       contextProjected: state.contextProjected === true,
       pendingConfirm: state.pendingConfirm
-        ? { id: state.pendingConfirm.id, name: state.pendingConfirm.name, args: state.pendingConfirm.args }
+        ? { id: state.pendingConfirm.id, name: state.pendingConfirm.name, args: state.pendingConfirm.args, mcp: state.pendingConfirm.mcp }
         : null,
     };
   }
@@ -333,13 +333,14 @@ export class AgentRuntimeCore {
     if (!state || !state.pendingConfirm || state.pendingConfirm.id !== id) {
       return false;
     }
-    if (all && approved) {
+    const isMcp = !!state.pendingConfirm.mcp;
+    if (all && approved && !isMcp) {
       state.approveAll = true;
     }
     const resolve = state.pendingConfirm.resolve;
     state.pendingConfirm = null;
     this.notify(state);
-    resolve(!!approved);
+    resolve(isMcp ? { approved: !!approved, always: !!all && !!approved } : !!approved);
     return true;
   }
 
