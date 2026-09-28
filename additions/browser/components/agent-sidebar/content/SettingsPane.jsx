@@ -348,12 +348,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
           </select>
         </label>
         <label className="settings-pane__field">
-          上下文窗口（token，留空自动）
+          上下文预算（token，留空使用默认）
           <input type="number" min="1" step="1" value={contextWindow}
-            placeholder="DeepSeek V4 自动使用 1000000"
+            placeholder="DeepSeek V4 默认 272000"
             onChange={e => { setContextWindow(e.target.value); setStatus(""); }} />
         </label>
-        <span className="settings-pane__hint">中转服务限制较小时，填写该服务实际支持的窗口上限。</span>
+        <span className="settings-pane__hint">DeepSeek V4 默认使用 272K 工作预算以控制长任务消耗；可显式调整，但不要超过模型或中转服务支持的窗口。</span>
 
       </section>
 

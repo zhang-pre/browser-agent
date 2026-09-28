@@ -160,6 +160,15 @@ cd upstream
 
 运行期的环境资料位于用户目录下的专用数据区域，不写入仓库或 Firefox 构建目录。
 
+### 开发首页空白
+
+如果 `./mach run` 打开后只有空白的 New Tab，而侧边栏与普通网页正常，检查开发 profile 是否残留了自动化偏好。在 `about:config` 中将以下两项重置为默认值，然后完整退出并重新启动浏览器：
+
+- `browser.newtabpage.activity-stream.testing.shouldInitializeFeeds`：残留为 `false` 时会阻止首页初始化。
+- `services.settings.server`：残留为 `data:,#remote-settings-dummy/v1` 时，远程附件请求会收到空响应，可能出现图标下载的 JSON 解析错误。
+
+同时检查 profile 的 `user.js`，避免重启时重新写入上述测试值。默认开发 profile 位于 `upstream/obj-*/tmp/profile-default/`。自动化验证应使用独立临时 profile，避免影响日常 `./mach run` 的配置。
+
 ---
 
 ## 模块边界

@@ -370,7 +370,9 @@ const { resolveContextWindowTokens } = await import("../modules/llm/LlmClient.sy
 const config = new ConfigStore();
 const profile = config.createModelProfile({ provider: "deepseek", model: "deepseek-v4-flash" });
 config.setActiveModelProfileId(profile.id);
-assert.equal(buildClientFromStore(config).contextWindowTokens, 1000000);
+assert.equal(buildClientFromStore(config).contextWindowTokens, 272000);
+assert.equal(resolveContextWindowTokens("deepseek-v4-pro"), 272000);
+assert.equal(resolveContextWindowTokens("deepseek-flash"), 272000);
 config.updateModelProfile(profile.id, { contextWindowTokens: 256000 });
 assert.equal(buildClientFromStore(config).contextWindowTokens, 256000);
 assert.equal(buildClientFromStore(config, { contextWindowTokens: 64000 }).contextWindowTokens, 64000);
@@ -385,8 +387,28 @@ const largeContext = await createUnifiedTurnContext({
   messages: [{ role: "user", content: "task" },
     ...Array.from({ length: 100 }, () => ({ role: "assistant", content: "x".repeat(6000) }))],
 });
-await largeContext.compact(1, largeContext.initialMessages);
-assert.equal(largeCalls, 0, "200k tokens must not trigger compression for a 1M model");
+const compactedLargeView = await largeContext.compact(1, largeContext.initialMessages);
+assert.ok(largeCalls > 0, "200k history must trigger compression under the default 272K working budget");
+assert.equal(largeContext.journal.compaction.version, 1);
+largeContext.requestMessages(compactedLargeView);
+const callsAfterCompaction = largeCalls;
+const belowThreshold = await createUnifiedTurnContext({
+  client: largeClient,
+  messages: [{ role: "user", content: "task" },
+    ...Array.from({ length: 80 }, () => ({ role: "assistant", content: "x".repeat(6000) }))],
+});
+await belowThreshold.compact(1, belowThreshold.initialMessages);
+assert.equal(largeCalls, callsAfterCompaction, "160k history remains below the default trigger");
+config.updateModelProfile(profile.id, { contextWindowTokens: 1000000 });
+const explicitLargeClient = buildClientFromStore(config);
+assert.equal(explicitLargeClient.contextWindowTokens, 1000000);
+explicitLargeClient.chat = async () => { throw new Error("explicit 1M budget should not compress 200k history"); };
+const explicitLargeContext = await createUnifiedTurnContext({
+  client: explicitLargeClient,
+  messages: [{ role: "user", content: "task" },
+    ...Array.from({ length: 100 }, () => ({ role: "assistant", content: "x".repeat(6000) }))],
+});
+await explicitLargeContext.compact(1, explicitLargeContext.initialMessages);
 console.log("OK model window, profile override and large-context runtime are connected");
 
 // A large tools/system budget must be counted once, not subtracted twice.

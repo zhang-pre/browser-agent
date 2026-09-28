@@ -39,13 +39,14 @@ export {
  *             usage: object|null, raw: object }} ChatResult
  */
 
-// Explicit gateway/profile limits take precedence over known model defaults.
+// This is the Agent working budget, not the provider maximum capacity.
+// Explicit gateway/profile budgets take precedence over cost-conscious defaults.
 // DeepSeek V4: https://api-docs.deepseek.com/news/news260424/
 export function resolveContextWindowTokens(model, configured) {
   if (Number.isFinite(configured) && configured > 0) return Math.floor(configured);
   if (/^deepseek-v4-(flash|pro)(?:$|[-/])/i.test(String(model || "")) ||
-      /^deepseek-flash$/i.test(String(model || ""))) return 1000000;
-  // Unknown models/gateways require an explicit limit; do not infer 1M from
+      /^deepseek-flash$/i.test(String(model || ""))) return 272000;
+  // Unknown models/gateways require an explicit limit; do not infer capacity from
   // broad names such as "opus" or future DeepSeek version numbers.
   return 128000;
 }

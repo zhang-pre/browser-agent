@@ -24,8 +24,7 @@ export const BUILTIN_PROVIDERS = Object.freeze({
   // deepseek-v4-pro 是推理/思考档：**支持工具调用**（实测能连跑上百次工具——之前"不支持 tools 会 400"的判断错了）。
   //   但思考链长，在**超长上下文 + 高频工具调用**下，到「思考完→发起调用」边界容易退化成纯文字 → drift 中断；
   //   长工具循环（逆向常上百轮）不如 flash 稳。→ pro 适合"难点单步深度分析"；**驱动这种工具重的 Agent 用 flash**（难站直接上 Claude）。
-  // ★1M 上下文：V4 全线原生支持 1M，且**官方 API 默认就是 1M**（无需任何标记）→ Agent 已把
-  //   deepseek-v4-* 直接识别为 1M 档。（Claude Code 那种 [1m] 标记是它中间层的约定，直连 API 不需要、还会 400。）
+  // Agent 默认按 272K 工作预算触发压缩，以控制长任务输入消耗；需要更大窗口时在模型配置中显式覆盖。
   deepseek: {
     label: "DeepSeek",
     protocol: "openai",
