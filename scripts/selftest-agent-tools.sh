@@ -30,6 +30,7 @@ SELFTESTS=(
   selftest-typography.mjs
   selftest-mozbuild.mjs
   selftest-providers.mjs
+  selftest-subscription.mjs
   selftest-usage.mjs
   selftest-prompt-cache.mjs
   selftest-conversations.mjs

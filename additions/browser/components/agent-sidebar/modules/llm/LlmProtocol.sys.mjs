@@ -5,10 +5,12 @@
  * functions and extended without growing the LlmClient facade.
  */
 
+import { buildCodexRequest, parseCodexResponse } from "./CodexResponses.sys.mjs";
 import { normalizeReasoningEffort } from "./ReasoningEffort.sys.mjs";
 
 export const PROTOCOLS = Object.freeze({
   OPENAI: "openai",
+  CODEX: "openai-codex-responses",
   ANTHROPIC: "anthropic",
   GEMINI: "gemini",
 });
@@ -69,6 +71,7 @@ export function buildLlmRequest(config, messages, opts = {}) {
     throw new LlmError("buildRequest: messages must be a non-empty array");
   }
   const protocol = config.protocol || PROTOCOLS.OPENAI;
+  if (protocol === PROTOCOLS.CODEX) return buildCodexRequest(config, messages, opts);
   const request = config.request || {};
   const compatibility = config.compatibility || {};
   const baseUrl = config.baseUrl || "";
@@ -195,6 +198,7 @@ export function buildLlmRequest(config, messages, opts = {}) {
 }
 
 export function parseLlmResponse(protocol, json) {
+  if (protocol === PROTOCOLS.CODEX) return parseCodexResponse(json);
   if (protocol === PROTOCOLS.ANTHROPIC) {
     const blocks = Array.isArray(json?.content) ? json.content : [];
     let content = "";

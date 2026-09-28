@@ -23,9 +23,12 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
 EXTRA_JS_MODULES.agentsidebar.host += [
     "modules/host/AgentSession.sys.mjs",
     "modules/host/FirefoxAgentRuntimeHost.sys.mjs",
+    "modules/host/FirefoxOAuthCallback.sys.mjs",
+    "modules/host/FirefoxSubscriptionAuth.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.llm += [
+    "modules/llm/CodexResponses.sys.mjs",
     "modules/llm/LlmClient.sys.mjs",
     "modules/llm/LlmProtocol.sys.mjs",
     "modules/llm/LlmRequestExecutor.sys.mjs",
@@ -36,9 +39,14 @@ EXTRA_JS_MODULES.agentsidebar.llm += [
 ]
 
 EXTRA_JS_MODULES.agentsidebar.providers += [
+    "modules/providers/ChatGptOAuth.sys.mjs",
     "modules/providers/ConfigStore.sys.mjs",
+    "modules/providers/CredentialStore.sys.mjs",
+    "modules/providers/ModelProvider.sys.mjs",
     "modules/providers/providers.sys.mjs",
     "modules/providers/SidebarTypography.sys.mjs",
+    "modules/providers/SubscriptionAuth.sys.mjs",
+    "modules/providers/SubscriptionModels.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.runtime += [

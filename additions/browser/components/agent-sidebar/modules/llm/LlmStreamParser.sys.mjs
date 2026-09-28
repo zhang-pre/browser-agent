@@ -4,6 +4,7 @@
  * supplies activity and UI callbacks; protocol response parsing remains pure.
  */
 
+import { readCodexStream } from "./CodexResponses.sys.mjs";
 import {
   looksLikeToolCallLeak,
   parseLlmResponse,
@@ -21,6 +22,7 @@ export async function readLlmStream(
     parseResponse = json => parseLlmResponse(protocol, json),
   } = {}
 ) {
+  if (protocol === PROTOCOLS.CODEX) return readCodexStream(response, { onDelta, onReasoning, onActivity });
   return protocol === PROTOCOLS.ANTHROPIC
     ? readAnthropicStream(response, {
         onDelta,

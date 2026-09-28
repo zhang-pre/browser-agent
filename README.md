@@ -48,6 +48,8 @@ browser-agent-mcp 将这些环节放进 Firefox 侧边栏中的常驻 Agent。�
 
 低复杂度目标可以优先使用速度快、成本低的模型；遇到大型站点、长上下文或复杂控制流时，建议改用能力更强的模型，减少重复探索。
 
+ChatGPT 订阅登录无需填写 API Key，请参阅 [Pi provider 分析与接入说明](docs/pi-provider-chatgpt-subscription.md)。
+
 ### 3. 选择执行节奏
 
 创建新会话时选择一种模式：

@@ -40,6 +40,9 @@ function loadModules() {
   const { agentSession } = ChromeUtils.importESModule(
     "resource:///modules/agentsidebar/host/AgentSession.sys.mjs"
   );
+  const { subscriptionAuth } = ChromeUtils.importESModule(
+    "resource:///modules/agentsidebar/host/FirefoxSubscriptionAuth.sys.mjs"
+  );
   const backends = getBackends();
   const router = new ToolRouter();
   router.registerAll(createBuiltinTools(backends));
@@ -47,7 +50,8 @@ function loadModules() {
     store: configStore,
     providers: listProviders(),
     conversations: conversationStore,
-    buildClient: () => buildClientFromStore(configStore),
+    buildClient: () => buildClientFromStore(configStore, { subscriptionAuth }),
+    subscriptionAuth,
     router,
     runAgentTurn,
     session: agentSession,
@@ -93,6 +97,7 @@ function App({ mods }) {
           store={mods.store}
           providers={mods.providers}
           fetchModels={mods.fetchModels}
+          subscriptionAuth={mods.subscriptionAuth}
           onClose={() => setView("chat")}
         />
       )}

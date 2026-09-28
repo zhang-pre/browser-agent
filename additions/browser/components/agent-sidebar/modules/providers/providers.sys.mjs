@@ -5,6 +5,8 @@
  * buildClientFromStore() 在发送时构造 LlmClient。
  */
 import { LlmClient } from "../llm/LlmClient.sys.mjs";
+import { ChatGptSubscriptionProvider } from "./ModelProvider.sys.mjs";
+import { CHATGPT_MODELS } from "./SubscriptionModels.sys.mjs";
 import { normalizeReasoningEffort } from "../llm/ReasoningEffort.sys.mjs";
 
 /** 内置 Claude 模型（Anthropic 协议自定义端点用；中转站 /v1/models 往往列不出 Claude）。
@@ -18,6 +20,15 @@ export const ANTHROPIC_MODELS = [
 ];
 
 export const BUILTIN_PROVIDERS = Object.freeze({
+  "openai-chatgpt": {
+    label: "OpenAI ChatGPT Subscription",
+    authType: "oauth",
+    protocol: "openai-codex-responses",
+    baseUrl: "https://chatgpt.com/backend-api",
+    chatPath: "/codex/responses",
+    defaultModel: CHATGPT_MODELS[0].id,
+    models: CHATGPT_MODELS.map(model => model.id),
+  },
   // 目前只支持 DeepSeek（用户 2026-05-25 决定）。其它 provider 待后续按需再加。
   // 2026 模型：deepseek-v4-flash(标准) / deepseek-v4-pro(推理/思考档)。旧名 chat/reasoner 兼容。
   // Agent 默认 deepseek-v4-flash：支持 function calling(工具调用)，是工具驱动 Agent 的必需。
@@ -213,7 +224,7 @@ export function isVisionModel(model) {
     return false;
   }
   const m = String(model).toLowerCase();
-  if (VISION_MODELS.has(m)) {
+  if (CHATGPT_MODELS.some(model => model.id === m && model.vision) || VISION_MODELS.has(m)) {
     return true;
   }
   return /(^|[-_/])(vl|vision)([-_/]|$)|gpt-4o|gpt-4\.1|qwen.*vl|claude-3|gemini-(1\.5|2)|kimi-k2/.test(m);
@@ -224,6 +235,7 @@ export function listProviders() {
   return Object.entries(BUILTIN_PROVIDERS).map(([id, p]) => ({
     id,
     label: p.label,
+    authType: p.authType || "api_key",
     baseUrl: p.baseUrl,
     models: p.models,
     defaultModel: p.defaultModel,
@@ -273,7 +285,14 @@ export function buildClientFromStore(store, overrides = {}) {
   if (!baseUrl) {
     throw new Error(`provider "${id}" 未配置 Base URL（请在设置里填写自定义端点地址）`);
   }
+  if (p.authType === "oauth") {
+    if (baseUrl !== p.baseUrl) throw new Error("ChatGPT Subscription 不支持自定义端点");
+    reasoningEffort = normalizeReasoningEffort(overrides.reasoningEffort ?? profile?.reasoningEffort ?? "auto");
+  }
+  const model = overrides.model || (profile ? profile.model : store.getModel(id)) || p.defaultModel;
+  const catalogModel = p.authType === "oauth" ? CHATGPT_MODELS.find(item => item.id === model) : null;
   return new LlmClient({
+    modelProvider: p.authType === "oauth" ? new ChatGptSubscriptionProvider(overrides.subscriptionAuth) : undefined,
     protocol,
     providerId: id,
     baseUrl,
@@ -281,13 +300,10 @@ export function buildClientFromStore(store, overrides = {}) {
     // A named profile is an isolation boundary. In particular, an empty Key
     // must not silently fall back to the active profile of the same provider.
     apiKey:
-      overrides.apiKey ??
+      p.authType === "oauth" ? "" : overrides.apiKey ??
       (profile ? profile.apiKey : store.getApiKey(id)),
-    model:
-      overrides.model ||
-      (profile ? profile.model : store.getModel(id)) ||
-      p.defaultModel,
-    contextWindowTokens: overrides.contextWindowTokens ?? profile?.contextWindowTokens,
+    model,
+    contextWindowTokens: overrides.contextWindowTokens ?? profile?.contextWindowTokens ?? catalogModel?.contextWindow,
     promptCacheMode:
       overrides.promptCacheMode ||
       (store.getPromptCacheMode && store.getPromptCacheMode()) ||
@@ -300,7 +316,7 @@ export function buildClientFromStore(store, overrides = {}) {
     request: {
       // Anthropic extended thinking uses a different object shape and token
       // budget contract; do not translate an OpenAI-compatible level into it.
-      reasoning_effort: protocol === "openai" ? reasoningEffort : "auto",
+      reasoning_effort: protocol === "openai" || p.authType === "oauth" ? reasoningEffort : "auto",
     },
   });
 }

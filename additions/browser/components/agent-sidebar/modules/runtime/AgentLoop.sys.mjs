@@ -456,10 +456,9 @@ export async function runAgentTurn(p) {
         // 计划文字原样抛给用户就停 → 用户看着像"莫名其妙中断"。这里补一句**为什么停 + 怎么办**，让中断不再神秘。
         const isDrift = !assist && !looksFinal;
         const driftDiag = isDrift
-          ? "\n\n---\n（系统）⚠ 模型**连续多次只输出文字计划、不调用工具**就停了 —— 不是任务做完，是模型卡在「工具调用」这一步。" +
-            "这通常是**模型侧**问题：① 推理档（`deepseek-reasoner` / R1）**不支持 function calling**，只会叙述下一步、不会真的发起工具调用；" +
-            "② DeepSeek 在**超长上下文 + 高频工具调用**下，到「思考完→发起调用」的边界容易退化成纯文字。" +
-            "**换 `deepseek-v4-flash`（支持工具、稳）或 Claude 续跑**即可；进展已落盘，开回原工作目录可接着干。"
+          ? "\n\n---\n（系统）连续多轮未收到可执行的工具调用，已停止自动续跑。" +
+            "可能是模型没有发起调用，也可能是 provider 请求或响应适配异常；仅凭文字计划无法确定原因。" +
+            "请检查当前 provider 的工具定义和响应解析，以及本轮实际工具记录。"
           : "";
         emit({ type: "final", content: res.content + driftDiag, round });
         return {

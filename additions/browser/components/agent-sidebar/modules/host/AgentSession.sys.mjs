@@ -5,6 +5,7 @@
  */
 
 import { createAgentRuntime } from "../runtime/AgentRuntime.sys.mjs";
+import { subscriptionAuth } from "./FirefoxSubscriptionAuth.sys.mjs";
 import { configStore } from "../providers/ConfigStore.sys.mjs";
 import { conversationStore } from "../state/ConversationStore.sys.mjs";
 import { createFirefoxAgentRuntimePorts } from "./FirefoxAgentRuntimeHost.sys.mjs";
@@ -15,7 +16,7 @@ const ports = createFirefoxAgentRuntimePorts({
   config: configStore,
   conversations: conversationStore,
   createClient: ({ transport }) =>
-    buildClientFromStore(configStore, { transport }),
+    buildClientFromStore(configStore, { transport, subscriptionAuth }),
   isVisionModel,
 });
 

@@ -25,6 +25,7 @@ const PROVIDER_NAMES = {
   minimax: "MiniMax",
   qwen: "通义千问",
   custom: "自定义模型",
+  "openai-chatgpt": "ChatGPT Subscription",
 };
 
 function profileId() {
@@ -41,7 +42,7 @@ function normalizeProfile(raw = {}) {
     id: String(raw.id || profileId()).slice(0, 100),
     name: cleanProfileName(raw.name, PROVIDER_NAMES[provider] || "模型配置"),
     provider,
-    apiKey: String(raw.apiKey || ""),
+    apiKey: provider === "openai-chatgpt" ? "" : String(raw.apiKey || ""),
     model: String(raw.model || "").trim(),
     baseUrl: String(raw.baseUrl || "").trim(),
     protocol: raw.protocol === "anthropic" ? "anthropic" : "openai",

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import ChatGptLogin from "./ChatGptLogin.jsx";
 import { applySidebarFontScale, normalizeFontScale } from "../modules/providers/SidebarTypography.sys.mjs";
 
 function legacyProfile(store, providers) {
@@ -17,7 +18,7 @@ function legacyProfile(store, providers) {
 }
 
 /** 模型配置管理：同一 provider 可保存多组账号/端点，选择历史配置即可切换。 */
-export default function SettingsPane({ store, providers, fetchModels, onClose }) {
+export default function SettingsPane({ store, providers, fetchModels, subscriptionAuth, onClose }) {
   const initialProfiles = store.listModelProfiles
     ? store.listModelProfiles()
     : [legacyProfile(store, providers)];
@@ -54,6 +55,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
     setFontScale(next);
   }
   const isCustom = provider === "custom";
+  const isSubscription = current.authType === "oauth";
   const providerRef = useRef(provider);
   providerRef.current = provider;
   const fetchSeqRef = useRef(0);
@@ -104,7 +106,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         model: model || current?.defaultModel || "",
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
-        reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        reasoningEffort: isCustom || isSubscription ? customReasoningEffort : "auto",
         contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       });
       refreshProfiles(p.id);
@@ -163,7 +165,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         model,
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
-        reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        reasoningEffort: isCustom || isSubscription ? customReasoningEffort : "auto",
         contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       };
       if (store.updateModelProfile) {
@@ -278,12 +280,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         </>
       )}
 
-      <label className="settings-pane__field">
+      {isSubscription ? <ChatGptLogin auth={subscriptionAuth} /> : <label className="settings-pane__field">
         {isCustom ? "API Key / Token" : "API Key"}
         <input type="password" value={apiKey} placeholder="sk-..." onChange={e => { setApiKey(e.target.value); setStatus(""); }} />
-      </label>
+      </label>}
 
-      {isCustom && customProtocol === "openai" && (
+      {(isSubscription || (isCustom && customProtocol === "openai")) && (
         <label className="settings-pane__field">
           思考等级
           <select value={customReasoningEffort} onChange={e => { setCustomReasoningEffort(e.target.value); setStatus(""); }}>
@@ -310,12 +312,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
             }}>
               {model && !modelOptions.includes(model) && <option value={model}>{model}（当前）</option>}
               {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-              {isCustom && <option value="__manual__">手动输入其它模型…</option>}
+              {(isCustom || isSubscription) && <option value="__manual__">手动输入其它模型…</option>}
             </select>
           ) : (
             <input className="settings-pane__grow" type="text" value={model} placeholder="模型名" onChange={e => { setModel(e.target.value); setStatus(""); }} />
           )}
-          <button type="button" className="settings-pane__btn-ghost" onClick={doFetchModels}>获取模型</button>
+          {!isSubscription && <button type="button" className="settings-pane__btn-ghost" onClick={doFetchModels}>获取模型</button>}
         </div>
         {fetchMsg && <span className="settings-pane__hint">{fetchMsg}</span>}
       </label>
@@ -364,7 +366,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       </div>
 
       <p className="settings-pane__note">
-        每条配置独立保存渠道、账号、模型和思考等级。Key 与旧版本一致，仅明文保存在本机浏览器 prefs，不会随会话导出。
+        每条配置独立保存渠道、账号、模型和思考等级。API Key 与旧版本一致，明文保存在本机浏览器 prefs；ChatGPT 订阅凭据使用 Firefox 加密登录存储。凭据不会随会话导出。
       </p>
     </div>
   );

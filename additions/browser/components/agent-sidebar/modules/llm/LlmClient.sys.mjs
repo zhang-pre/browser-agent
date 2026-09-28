@@ -23,6 +23,7 @@ import {
   readOpenAiStream,
 } from "./LlmStreamParser.sys.mjs";
 import { createLlmTransport } from "./LlmTransport.sys.mjs";
+import { ApiKeyModelProvider } from "../providers/ModelProvider.sys.mjs";
 
 export {
   LlmError,
@@ -74,6 +75,7 @@ export class LlmClient {
     this.baseUrl = (config.baseUrl || "").replace(/\/+$/, "");
     this.chatPath = config.chatPath || "/v1/chat/completions";
     this.apiKey = config.apiKey || "";
+    this.modelProvider = config.modelProvider || new ApiKeyModelProvider({ apiKey: this.apiKey, protocol: this.protocol });
     this.model = config.model || "";
     this.contextWindowTokens = resolveContextWindowTokens(this.model, config.contextWindowTokens);
     this.providerId = config.providerId || "custom";
@@ -148,7 +150,7 @@ export class LlmClient {
   async chat(messages, opts = {}) {
     return await executeLlmChat(
       {
-        apiKey: this.apiKey,
+        modelProvider: this.modelProvider,
         protocol: this.protocol,
         request: this.request,
         transport: this.transport,
