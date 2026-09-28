@@ -109,6 +109,7 @@ export class AgentTurnOrchestrator {
         );
         if (result?.content) {
           context.turnMessages.push({ role: "assistant", content: result.content,
+            ...(result.providerState ? { providerState: result.providerState } : {}),
             ...(result.reasoningContent !== undefined ? { reasoning_content: result.reasoningContent } : {}),
           });
         }
@@ -280,7 +281,7 @@ export class AgentTurnOrchestrator {
         context.threadId,
         result.content || "（继续推进）",
         context.state.steps,
-        { reasoningContent: result.reasoningContent }
+        { reasoningContent: result.reasoningContent, providerState: result.providerState }
       );
       this._startNextSegment(context.state);
       turnMessages = (result.messages || turnMessages).filter(
@@ -492,7 +493,7 @@ export class AgentTurnOrchestrator {
     const { state, threadId } = context;
     state.aborted = context.abortController.signal.aborted || result?.stopReason === "aborted";
     state.content = result?.content || textFromSteps(state.steps) || "";
-    const persisted = await this._persist(threadId, state.content, state.steps, { reasoningContent: result?.reasoningContent });
+    const persisted = await this._persist(threadId, state.content, state.steps, { reasoningContent: result?.reasoningContent, providerState: result?.providerState });
     await this._setTurnStatus(threadId, state.aborted ? "cancelled" : "completed");
     if (!state.aborted && persisted && (!result?.stopReason || ["stop", "final"].includes(result.stopReason))) {
       // Publish the saved answer before extracting memory; keep a cancellable
@@ -550,13 +551,14 @@ export class AgentTurnOrchestrator {
     }
   }
 
-  async _persist(threadId, content, steps, { skipContext = false, reasoningContent } = {}) {
+  async _persist(threadId, content, steps, { skipContext = false, reasoningContent, providerState } = {}) {
     try {
       const slim = slimifySteps(steps);
       await this.conversationStore.appendMessage(threadId, {
         role: "assistant",
         content,
         skipContext,
+        ...(providerState ? { providerState } : {}),
         ...(reasoningContent !== undefined ? { reasoning_content: reasoningContent } : {}),
         ...(slim.length ? { steps: slim } : {}),
       });

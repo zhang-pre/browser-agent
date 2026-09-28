@@ -18,6 +18,14 @@ export function buildCodexRequest(config, messages, opts = {}) {
         output: typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? ""),
       });
     } else if (message.role === "assistant") {
+      const state = message.providerState;
+      if (state?.protocol === "openai-codex-responses" && state.model === model &&
+          state.content === message.content &&
+          JSON.stringify(state.toolCalls || []) === JSON.stringify(message.tool_calls || []) &&
+          Array.isArray(state.items)) {
+        input.push(...structuredClone(state.items));
+        continue;
+      }
       const text = textOf(message.content);
       if (text) input.push({ role: "assistant", content: [{ type: "output_text", text }] });
       for (const call of message.tool_calls || []) {
@@ -43,6 +51,7 @@ export function buildCodexRequest(config, messages, opts = {}) {
   const body = {
     model, instructions: instructions.join("\n\n") || "You are a helpful assistant.",
     input, stream: true, store: false, parallel_tool_calls: true,
+    include: ["reasoning.encrypted_content"],
   };
   if (opts.tools?.length) {
     body.tools = opts.tools.map(tool => {
@@ -63,7 +72,13 @@ export function buildCodexRequest(config, messages, opts = {}) {
     url: config.baseUrl + config.chatPath, cacheApplied: false,
     init: {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: {
+        "Content-Type": "application/json", Accept: "text/event-stream",
+        ...(body.prompt_cache_key ? {
+          "session-id": body.prompt_cache_key,
+          "x-client-request-id": body.prompt_cache_key,
+        } : {}),
+      },
       body: JSON.stringify(body),
     },
   };
@@ -87,6 +102,14 @@ export function parseCodexResponse(response) {
     }
   }
   return { content, reasoningContent, toolCalls,
+    providerState: {
+      protocol: "openai-codex-responses",
+      items: structuredClone((response?.output || []).filter(item =>
+        item.type === "message" || item.type === "function_call" ||
+        (item.type === "reasoning" && item.encrypted_content))),
+      content, toolCalls: structuredClone(toolCalls),
+      reasoningTokens: response?.usage?.output_tokens_details?.reasoning_tokens || 0,
+    },
     finishReason: toolCalls.length ? "tool_calls" : "stop", usage: response?.usage || null, raw: response };
 }
 
@@ -99,7 +122,7 @@ function completedOutput(items, output = []) {
       (item.id && previous.id === item.id) ||
       (item.type === "function_call" && previous.type === item.type && item.call_id === previous.call_id)
     );
-    if (existing >= 0) merged[existing] = item;
+    if (existing >= 0) merged[existing] = { ...merged[existing], ...item };
     else if (!item.id && !merged[index]?.id && merged[index]?.type === item.type &&
              item.type !== "function_call") merged[index] = item;
     else merged.push(item);
@@ -169,4 +192,32 @@ export async function readCodexStream(response, { onDelta, onReasoning, onActivi
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+}
+
+// Store counts and hashes only; never persist request text or encrypted content here.
+export async function measureCodexCache(body, usage, previous) {
+  const { input, ...stable } = JSON.parse(body);
+  const hash = async value => {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256",
+      new TextEncoder().encode(JSON.stringify(value)));
+    return Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, "0")).join("");
+  };
+  const [stableHash, ...items] = await Promise.all([stable, ...input].map(hash));
+
+  let common = 0;
+  if (previous?.stableHash === stableHash) {
+    while (common < previous.items.length && common < items.length &&
+           previous.items[common] === items[common]) common++;
+  }
+  const diagnostics = {
+    version: 1,
+    stableRequestHash: stableHash,
+    stableRequestUnchanged: previous ? previous.stableHash === stableHash : null,
+    previousInputItems: previous?.items.length ?? null,
+    inputItems: items.length,
+    commonPrefixItems: previous ? common : null,
+    inputTokens: usage?.input_tokens ?? null,
+    cachedTokens: usage?.input_tokens_details?.cached_tokens ?? null,
+  };
+  return { diagnostics, previous: { stableHash, items } };
 }

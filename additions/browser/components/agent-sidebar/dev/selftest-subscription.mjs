@@ -5,6 +5,7 @@ import { CredentialStore } from "../modules/providers/CredentialStore.sys.mjs";
 import { ChatGptOAuth, CHATGPT_ENDPOINT, CHATGPT_PROVIDER_ID, OAUTH_CLIENT_ID, OAUTH_REDIRECT_URI, createAuthorizationRequest, validateCallback } from "../modules/providers/ChatGptOAuth.sys.mjs";
 import { SubscriptionAuth } from "../modules/providers/SubscriptionAuth.sys.mjs";
 import { ChatGptSubscriptionProvider } from "../modules/providers/ModelProvider.sys.mjs";
+import { ConversationStore } from "../modules/state/ConversationStore.sys.mjs";
 import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
 import { buildClientFromStore, isVisionModel } from "../modules/providers/providers.sys.mjs";
 import { createLlmTransport } from "../modules/llm/LlmTransport.sys.mjs";
@@ -206,6 +207,10 @@ const body = JSON.parse(requests[1].init.body);
 assert.equal(body.instructions, "system rules");
 assert.equal(body.stream, true);
 assert.equal(body.store, false);
+const routed = client.buildRequest([{ role: "user", content: "test" }], { cacheKey: "thread-test" });
+assert.equal(routed.init.headers["session-id"], "thread-test");
+assert.equal(routed.init.headers["x-client-request-id"], "thread-test");
+assert.equal(client.buildRequest([{ role: "user", content: "test" }]).init.headers["session-id"], undefined);
 assert.equal(body.temperature, undefined);
 assert.equal(body.max_tokens, undefined);
 await assert.rejects(new ChatGptSubscriptionProvider(liveAuth.service).authorize({
@@ -276,7 +281,8 @@ assert.equal(callbackFailure.content, "你好");
 
 // Identity merge deduplicates full terminal output and preserves partial output.
 const identifiedTool = { ...tool, id: "fc_test" };
-const identifiedMessage = { ...message("starting"), id: "msg_test" };
+const identifiedMessage = { ...message("starting"), id: "msg_test", role: "assistant", phase: "commentary" };
+const encryptedReasoning = { type: "reasoning", id: "rs_test", encrypted_content: "opaque-test-only", summary: [] };
 for (const terminalType of ["response.completed", "response.done"]) {
   const merged = await readCodexStream(sse([
     { type: "response.output_item.done", output_index: 0, item: identifiedMessage },
@@ -297,14 +303,18 @@ const loopClient = buildClientFromStore(config, { subscriptionAuth: liveAuth.ser
   fetch: async (_address, init) => {
     const sent = JSON.parse(init.body);
     assert.equal(sent.tools[0].name, "page_info");
+    assert.deepEqual(sent.include, ["reasoning.encrypted_content"]);
     rounds++;
     if (rounds === 1) return sse([
       { type: "response.output_text.delta", delta: "starting" },
-      { type: "response.output_item.done", output_index: 0, item: identifiedMessage },
-      { type: "response.output_item.done", output_index: 1, item: identifiedTool },
+      { type: "response.output_item.done", output_index: 0, item: encryptedReasoning },
+      { type: "response.output_item.done", output_index: 1, item: identifiedMessage },
+      { type: "response.output_item.done", output_index: 2, item: identifiedTool },
       completed([]),
     ], { split: true });
     assert.equal(rounds, 2, "must not drift or keep retrying after a tool response");
+    assert.deepEqual(sent.input.filter(item => ["reasoning", "message", "function_call"].includes(item.type)),
+      [encryptedReasoning, identifiedMessage, identifiedTool]);
     assert.ok(sent.input.some(item => item.type === "function_call_output" &&
       item.call_id === "call_1" && item.output.includes("test-page")));
     return sse([completed([message("已完成测试")])]);
@@ -330,6 +340,48 @@ assert.equal(dispatched, 1);
 assert.equal(rounds, 2);
 assert.equal(loopResult.stopReason, "final");
 assert.equal(loopResult.content, "已完成测试");
+const diagnostic = loopResult.providerState.cacheDiagnostics;
+assert.equal(diagnostic.stableRequestUnchanged, true);
+assert.equal(diagnostic.commonPrefixItems, diagnostic.previousInputItems);
+assert.equal(diagnostic.inputTokens, 12);
+assert.equal(diagnostic.cachedTokens, 3);
+assert.ok(!JSON.stringify(diagnostic).includes("opaque-test-only"));
+assert.equal(diagnostic.stableRequestHash.length, 64);
+
+// Save/reload through the actual ConversationStore JSON boundary.
+const originalIO = globalThis.IOUtils;
+let savedJSON;
+globalThis.IOUtils = {
+  readJSON: async () => JSON.parse(savedJSON),
+  writeJSON: async (_path, data) => { savedJSON = JSON.stringify(data); },
+};
+try {
+  const store = new ConversationStore({ path: "/virtual/conversations.json", memoryOnly: false });
+  const thread = await store.createThread();
+  const historical = loopResult.messages.filter(m => m.role !== "system");
+  await store.appendContextEvents(thread.id, historical);
+  await store.appendMessage(thread.id, { role: "assistant", content: loopResult.content, providerState: loopResult.providerState });
+  const reopened = new ConversationStore({ path: "/virtual/conversations.json", memoryOnly: false });
+  const restored = await reopened.getModelMessages(thread.id);
+  const payload = JSON.parse(loopClient.buildRequest(restored).init.body);
+  assert.deepEqual(payload.input.find(item => item.type === "reasoning"), encryptedReasoning);
+  assert.deepEqual(payload.input.find(item => item.id === "msg_test"), identifiedMessage);
+  assert.deepEqual(payload.input.find(item => item.id === "fc_test"), identifiedTool);
+  const switched = JSON.parse(loopClient.buildRequest(restored, { model: "different-model" }).init.body);
+  assert.ok(!switched.input.some(item => item.type === "reasoning" || item.id === "msg_test"));
+  const edited = restored.map(m => m.providerState?.items.some(item => item.id === "msg_test")
+    ? { ...m, content: "edited history" } : m);
+  assert.ok(!JSON.parse(loopClient.buildRequest(edited).init.body).input.some(item => item.id === "msg_test"));
+  const { LlmClient } = await import("../modules/llm/LlmClient.sys.mjs");
+  for (const protocol of ["openai", "anthropic"]) {
+    const otherClient = new LlmClient({ protocol, model: "other", apiKey: "test", baseUrl: "https://example.test" });
+    const foreignBody = otherClient.buildRequest(restored).init.body;
+    assert.ok(!foreignBody.includes("opaque-test-only") && !foreignBody.includes("providerState"));
+  }
+} finally {
+  if (originalIO === undefined) delete globalThis.IOUtils;
+  else globalThis.IOUtils = originalIO;
+}
 
 // Firefox's reader error must be distinguished from an API/protocol rejection.
 function brokenStream(partial = false, abortSignal = null) {

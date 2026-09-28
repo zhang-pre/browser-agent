@@ -137,7 +137,9 @@ OAuth 服务的错误不回显 token 响应正文；订阅模型 HTTP 错误也�
 
 system/developer 消息变为 instructions；用户文本/图片变为 input_text/input_image；assistant 工具调用和工具结果分别变为 function_call/function_call_output。流式完成后返回现有 Runtime 的 toolCalls，工具调度器不需要识别 OAuth。
 
-即使调用者没有 onDelta，Codex HTTP 请求仍使用 SSE，再汇总成同样的 ChatResult。缺少 response.completed、response.failed 或 incomplete 都作为失败处理，不把截断工具调用交给 Runtime 执行。当前重放可见文本与工具历史，不保存加密 reasoning item，也未实现 WebSocket transport。
+即使调用者没有 onDelta，Codex HTTP 请求仍使用 SSE，再汇总成同样的 ChatResult。缺少 response.completed、response.failed 或 incomplete 都作为失败处理，不把截断工具调用交给 Runtime 执行。请求显式包含 `include: ["reasoning.encrypted_content"]`。响应中的 reasoning（含加密内容）、message（含 id/phase）和 function_call（含 item id/call_id）按原顺序存入不透明 `providerState`，经过 AgentLoop、统一上下文和 ConversationStore 保存，在同一模型的后续请求中回传。界面仍只显示可见文本和推理摘要；加密内容不解密，也不进入摘要提示。切换模型或协议、修改历史文本/工具调用时退回通用历史，不重放过期的原始项。上下文预算使用服务端报告的推理 token 数，而不把加密字符串长度当作 token 数。尚未实现 WebSocket transport。
+
+此修复不能补回旧会话已丢弃的推理项。验证缓存改善应使用重启后的新运行；离线回归确认字段保真及 provider 隔离，不保证服务端达到特定缓存命中率。
 
 候选模型列表不是账户可用性保证，支持手动输入模型 ID；本次没有猜测 Codex 的远程 models API，也没有拿订阅 token 调用通用 /v1/models。
 

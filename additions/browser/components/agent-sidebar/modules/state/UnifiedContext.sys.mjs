@@ -10,13 +10,14 @@ export function estimateTokens(value) {
 export function messageTokens(m) {
   return 8 + estimateTokens(m?.content) +
     (m?.tool_calls ? estimateTokens(m.tool_calls) : 0) +
-    (m?.reasoning_content ? estimateTokens(m.reasoning_content) : 0);
+    (m?.reasoning_content ? estimateTokens(m.reasoning_content) : 0) +
+    Math.max(0, Number(m?.providerState?.reasoningTokens) || 0);
 }
 export const messagesTokens = messages => (messages || []).reduce((n, m) => n + messageTokens(m), 0);
 
 function modelMessage(m) {
   const out = { role: m.role, content: m.content ?? "" };
-  for (const key of ["tool_calls", "tool_call_id", "name", "reasoning_content", "artifact"]) {
+  for (const key of ["tool_calls", "tool_call_id", "name", "reasoning_content", "providerState", "artifact"]) {
     if (m[key] !== undefined) out[key] = m[key];
   }
   return out;

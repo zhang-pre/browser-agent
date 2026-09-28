@@ -23,6 +23,7 @@ import {
   readOpenAiStream,
 } from "./LlmStreamParser.sys.mjs";
 import { createLlmTransport } from "./LlmTransport.sys.mjs";
+import { measureCodexCache } from "./CodexResponses.sys.mjs";
 import { ApiKeyModelProvider } from "../providers/ModelProvider.sys.mjs";
 
 export {
@@ -148,7 +149,8 @@ export class LlmClient {
    * @returns {Promise<ChatResult>}
    */
   async chat(messages, opts = {}) {
-    return await executeLlmChat(
+    let sentRequest;
+    const result = await executeLlmChat(
       {
         modelProvider: this.modelProvider,
         protocol: this.protocol,
@@ -156,12 +158,25 @@ export class LlmClient {
         transport: this.transport,
         compatibility: this.compatibility,
         buildRequest: (inputMessages, inputOptions) =>
-          this.buildRequest(inputMessages, inputOptions),
+          (sentRequest = this.buildRequest(inputMessages, inputOptions)),
         parseResponse: json => this.parseResponse(json),
       },
       messages,
       opts
     );
+    if (result.providerState) result.providerState.model =
+      String(opts.model || this.model).replace(/\s*\[\d+[a-z]?\]\s*$/i, "");
+    if (result.providerState && sentRequest) {
+      try {
+        const measured = await measureCodexCache(sentRequest.init.body, result.usage, this._cacheDiagnosticPrevious);
+        result.providerState.cacheDiagnostics = measured.diagnostics;
+        this._cacheDiagnosticPrevious = measured.previous;
+      } catch {
+        // Diagnostics must never fail a successful completion.
+        result.providerState.cacheDiagnostics = { version: 1, unavailable: true };
+      }
+    }
+    return result;
   }
 
   _delay(ms) {

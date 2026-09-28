@@ -24,7 +24,7 @@ function stripRuntime(content) {
 }
 function forApi(m) {
   const out = { role: m.role, content: m.content };
-  for (const key of ["tool_calls", "tool_call_id", "name", "reasoning_content"]) {
+  for (const key of ["tool_calls", "tool_call_id", "name", "reasoning_content", "providerState"]) {
     if (m[key] !== undefined) out[key] = m[key];
   }
   return out;

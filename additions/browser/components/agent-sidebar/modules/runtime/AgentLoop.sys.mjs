@@ -23,6 +23,7 @@ const MAX_TRUNC_RETRIES = 6;
 function assistantReply(res, content = res.content ?? "") {
   return {
     role: "assistant", content,
+    ...(res.providerState ? { providerState: res.providerState } : {}),
     ...(res.reasoningContent !== undefined ? { reasoning_content: res.reasoningContent } : {}),
   };
 }
@@ -426,6 +427,7 @@ export async function runAgentTurn(p) {
               `\n\n（已停下）模型连续把输出预算耗在"思考"上、始终没发出工具调用就被长度限制切断` +
               `（思考型模型的 reasoning 无法靠提示压住）。进展已落盘。建议换更稳的模型（如 Claude）续跑，或把该模型 max_tokens 调大。`,
             reasoningContent: res.reasoningContent,
+          providerState: res.providerState,
             rounds: round,
             toolCalls: allToolCalls,
             messages: msgs,
@@ -464,6 +466,7 @@ export async function runAgentTurn(p) {
         return {
           content: (res.content || "") + driftDiag,
           reasoningContent: res.reasoningContent,
+          providerState: res.providerState,
           rounds: round,
           toolCalls: allToolCalls,
           messages: msgs,
@@ -720,6 +723,7 @@ export async function runAgentTurn(p) {
   emit({ type: "max_rounds", maxRounds });
   // 轮数用尽：不带工具再问一次，逼模型基于已有工具结果直接给结论，而不是空停。
   let summary = "";
+  let finalProviderState;
   let finalReasoning;
   try {
     msgs = await turnContext.compact(maxRounds + 1, msgs);
@@ -743,6 +747,7 @@ export async function runAgentTurn(p) {
     }
     summary = fin.content || "";
     finalReasoning = fin.reasoningContent;
+    finalProviderState = fin.providerState;
   } catch {
     /* 总结失败就退回提示 */
   }
@@ -752,6 +757,7 @@ export async function runAgentTurn(p) {
       summary ||
       `（已达最大轮数 ${maxRounds}，仍未得出结论。可换个问法、缩小范围，或分步让我做。）`,
     reasoningContent: finalReasoning,
+    providerState: finalProviderState,
     rounds: maxRounds,
     toolCalls: allToolCalls,
     messages: msgs,

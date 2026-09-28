@@ -72,6 +72,8 @@ export function buildLlmRequest(config, messages, opts = {}) {
   }
   const protocol = config.protocol || PROTOCOLS.OPENAI;
   if (protocol === PROTOCOLS.CODEX) return buildCodexRequest(config, messages, opts);
+  // Opaque Responses history is private to that protocol.
+  messages = messages.map(({ providerState, ...message }) => message);
   const request = config.request || {};
   const compatibility = config.compatibility || {};
   const baseUrl = config.baseUrl || "";

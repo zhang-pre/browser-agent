@@ -313,6 +313,7 @@ export class ConversationStore {
       ).state;
     }
     t.messages.push({ role: msg.role, content: msg.content,
+      ...(msg.providerState ? { providerState: msg.providerState } : {}),
       ...(msg.reasoning_content !== undefined ? { reasoning_content: msg.reasoning_content } : {}),
       ...(msg.steps ? { steps: msg.steps } : {}) });
     t.updatedAt = nextTs();
