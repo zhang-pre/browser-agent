@@ -1,4 +1,6 @@
 import React, { useRef, useState } from "react";
+import ChatGptLogin from "./ChatGptLogin.jsx";
+import { applySidebarFontScale, normalizeFontScale } from "../modules/providers/SidebarTypography.sys.mjs";
 
 function legacyProfile(store, providers) {
   const provider = store.getActiveProvider();
@@ -16,7 +18,7 @@ function legacyProfile(store, providers) {
 }
 
 /** 模型配置管理：同一 provider 可保存多组账号/端点，选择历史配置即可切换。 */
-export default function SettingsPane({ store, providers, fetchModels, onClose }) {
+export default function SettingsPane({ store, providers, fetchModels, subscriptionAuth, onClose }) {
   const initialProfiles = store.listModelProfiles
     ? store.listModelProfiles()
     : [legacyProfile(store, providers)];
@@ -31,13 +33,14 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
   const [provider, setProvider] = useState(initial.provider);
   const [apiKey, setApiKey] = useState(initial.apiKey || "");
   const [model, setModel] = useState(initial.model || "");
+  const [contextWindow, setContextWindow] = useState(initial.contextWindowTokens || "");
   const [customUrl, setCustomUrl] = useState(initial.baseUrl || "");
   const [customProtocol, setCustomProtocol] = useState(initial.protocol || "openai");
   const [customReasoningEffort, setCustomReasoningEffort] = useState(initial.reasoningEffort || "auto");
   const [confirmTools, setConfirmTools] = useState(store.getConfirmTools ? store.getConfirmTools() : false);
   const [promptCacheMode, setPromptCacheMode] = useState(store.getPromptCacheMode ? store.getPromptCacheMode() : "auto");
   const [promptCacheTtl, setPromptCacheTtl] = useState(store.getPromptCacheTtl ? store.getPromptCacheTtl() : "default");
-  const [contextStrategy, setContextStrategy] = useState(store.getContextStrategy ? store.getContextStrategy() : "projected");
+  const [fontScale, setFontScale] = useState(() => store.getSidebarFontScale?.() ?? 100);
   const [fetchedModels, setFetchedModels] = useState([]);
   const [fetchMsg, setFetchMsg] = useState("");
   const [manual, setManual] = useState(false);
@@ -45,7 +48,14 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
   const [error, setError] = useState("");
 
   const current = providers.find(p => p.id === provider) || providers[0];
+  function updateFontScale(value) {
+    const next = normalizeFontScale(value);
+    store.setSidebarFontScale?.(next);
+    applySidebarFontScale(document, next);
+    setFontScale(next);
+  }
   const isCustom = provider === "custom";
+  const isSubscription = current.authType === "oauth";
   const providerRef = useRef(provider);
   providerRef.current = provider;
   const fetchSeqRef = useRef(0);
@@ -65,6 +75,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
     setApiKey(p.apiKey || "");
     setModel(p.model || "");
     setCustomUrl(p.baseUrl || "");
+    setContextWindow(p.contextWindowTokens || "");
     setCustomProtocol(p.protocol || "openai");
     setCustomReasoningEffort(p.reasoningEffort || "auto");
     setFetchedModels([]);
@@ -95,7 +106,8 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         model: model || current?.defaultModel || "",
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
-        reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        reasoningEffort: isCustom || isSubscription ? customReasoningEffort : "auto",
+        contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       });
       refreshProfiles(p.id);
       loadProfile(p, "已新建配置，请填写账号信息后保存");
@@ -142,6 +154,9 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
 
   function save() {
     try {
+      if (contextWindow !== "" && (!Number.isSafeInteger(Number(contextWindow)) || Number(contextWindow) <= 0)) {
+        throw new Error("上下文窗口须填写正整数，或留空自动选择");
+      }
       let p;
       const values = {
         name: profileName,
@@ -150,7 +165,8 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         model,
         baseUrl: isCustom ? customUrl : "",
         protocol: isCustom ? customProtocol : "openai",
-        reasoningEffort: isCustom ? customReasoningEffort : "auto",
+        reasoningEffort: isCustom || isSubscription ? customReasoningEffort : "auto",
+        contextWindowTokens: contextWindow === "" ? null : Number(contextWindow),
       };
       if (store.updateModelProfile) {
         p = store.updateModelProfile(profileId, values);
@@ -170,7 +186,6 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       store.setConfirmTools?.(confirmTools);
       store.setPromptCacheMode?.(promptCacheMode);
       store.setPromptCacheTtl?.(promptCacheTtl);
-      store.setContextStrategy?.(contextStrategy);
       loadProfile(p, "已保存并设为当前配置");
     } catch (e) {
       setError((e && e.message) || String(e));
@@ -212,6 +227,15 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         <span>设置</span>
         {onClose && <button type="button" onClick={onClose} title="关闭">×</button>}
       </header>
+
+      <section className="settings-pane__section">
+        <div className="settings-pane__section-title">侧栏文字大小</div>
+        <label className="settings-pane__fontscale">
+          <input type="range" min="90" max="180" step="10" value={fontScale} aria-label="侧栏文字大小" aria-valuetext={`${fontScale}%`} onChange={e => updateFontScale(e.target.value)} />
+          <output>{fontScale}%</output>
+          <button type="button" className="settings-pane__btn-ghost" onClick={() => updateFontScale(100)}>默认</button>
+        </label>
+      </section>
 
       <section className="settings-pane__section">
         <div className="settings-pane__section-title">模型配置</div>
@@ -256,12 +280,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         </>
       )}
 
-      <label className="settings-pane__field">
+      {isSubscription ? <ChatGptLogin auth={subscriptionAuth} /> : <label className="settings-pane__field">
         {isCustom ? "API Key / Token" : "API Key"}
         <input type="password" value={apiKey} placeholder="sk-..." onChange={e => { setApiKey(e.target.value); setStatus(""); }} />
-      </label>
+      </label>}
 
-      {isCustom && customProtocol === "openai" && (
+      {(isSubscription || (isCustom && customProtocol === "openai")) && (
         <label className="settings-pane__field">
           思考等级
           <select value={customReasoningEffort} onChange={e => { setCustomReasoningEffort(e.target.value); setStatus(""); }}>
@@ -288,12 +312,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
             }}>
               {model && !modelOptions.includes(model) && <option value={model}>{model}（当前）</option>}
               {modelOptions.map(m => <option key={m} value={m}>{m}</option>)}
-              {isCustom && <option value="__manual__">手动输入其它模型…</option>}
+              {(isCustom || isSubscription) && <option value="__manual__">手动输入其它模型…</option>}
             </select>
           ) : (
             <input className="settings-pane__grow" type="text" value={model} placeholder="模型名" onChange={e => { setModel(e.target.value); setStatus(""); }} />
           )}
-          <button type="button" className="settings-pane__btn-ghost" onClick={doFetchModels}>获取模型</button>
+          {!isSubscription && <button type="button" className="settings-pane__btn-ghost" onClick={doFetchModels}>获取模型</button>}
         </div>
         {fetchMsg && <span className="settings-pane__hint">{fetchMsg}</span>}
       </label>
@@ -326,13 +350,13 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
           </select>
         </label>
         <label className="settings-pane__field">
-          长会话策略
-          <select value={contextStrategy} onChange={e => { setContextStrategy(e.target.value); setStatus(""); }}>
-            <option value="projected">持久化上下文投影（推荐）</option>
-            <option value="legacy">旧完整历史（兼容）</option>
-          </select>
+          上下文预算（token，留空使用默认）
+          <input type="number" min="1" step="1" value={contextWindow}
+            placeholder="DeepSeek V4 默认 272000"
+            onChange={e => { setContextWindow(e.target.value); setStatus(""); }} />
         </label>
-        <span className="settings-pane__hint">完整对话始终保留；切换策略从下一轮生效。</span>
+        <span className="settings-pane__hint">DeepSeek V4 默认使用 272K 工作预算以控制长任务消耗；可显式调整，但不要超过模型或中转服务支持的窗口。</span>
+
       </section>
 
       {error && <div className="settings-pane__error">{error}</div>}
@@ -342,7 +366,7 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       </div>
 
       <p className="settings-pane__note">
-        每条配置独立保存渠道、账号、模型和思考等级。Key 与旧版本一致，仅明文保存在本机浏览器 prefs，不会随会话导出。
+        每条配置独立保存渠道、账号、模型和思考等级。API Key 与旧版本一致，明文保存在本机浏览器 prefs；ChatGPT 订阅凭据使用 Firefox 加密登录存储。凭据不会随会话导出。
       </p>
     </div>
   );

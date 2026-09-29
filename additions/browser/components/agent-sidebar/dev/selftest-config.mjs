@@ -2,11 +2,11 @@
  *   node dev/selftest-config.mjs
  * 不随 omni.ja 打包。
  */
-import { ConfigStore } from "../modules/ConfigStore.sys.mjs";
+import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
 import {
   normalizeReasoningEffort,
   REASONING_EFFORT_VALUES,
-} from "../modules/ReasoningEffort.sys.mjs";
+} from "../modules/llm/ReasoningEffort.sys.mjs";
 
 const cs = new ConfigStore();
 let fail = 0;
@@ -50,9 +50,6 @@ cs.setPromptCacheMode("off");
 check("提示缓存可关闭", cs.getPromptCacheMode(), "off");
 cs.setPromptCacheTtl("1h");
 check("缓存 TTL 持久化", cs.getPromptCacheTtl(), "1h");
-check("默认使用持久化上下文投影", cs.getContextStrategy(), "projected");
-cs.setContextStrategy("legacy");
-check("上下文策略可一键回退旧模式", cs.getContextStrategy(), "legacy");
 
 const migrated = cs.listModelProfiles();
 check("旧配置自动迁移成一条命名配置", migrated.length, 1);
@@ -77,6 +74,7 @@ const accountB = cs.createModelProfile({
 check("同渠道可保存多账号", cs.listModelProfiles().length, 2);
 check("新建配置自动选中", cs.getActiveModelProfileId(), accountB.id);
 check("当前配置读取账号 B Key", cs.getApiKey("custom"), "sk-account-b");
+check("可按 id 读取非当前模型配置", cs.getModelProfile(accountA.id)?.apiKey, "sk-account-a");
 cs.setActiveModelProfileId(accountA.id);
 check("历史配置切回账号 A", cs.getApiKey("custom"), "sk-account-a");
 const copy = cs.duplicateModelProfile(accountA.id);

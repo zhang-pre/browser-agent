@@ -1,0 +1,27 @@
+/* AgentSession.sys.mjs — Firefox composition entry point.
+ *
+ * The reusable runtime lives in AgentRuntime.sys.mjs. This module only supplies
+ * Firefox adapters and exports the process-lifetime instance used by UI/MCP.
+ */
+
+import { createAgentRuntime } from "../runtime/AgentRuntime.sys.mjs";
+import { subscriptionAuth } from "./FirefoxSubscriptionAuth.sys.mjs";
+import { configStore } from "../providers/ConfigStore.sys.mjs";
+import { conversationStore } from "../state/ConversationStore.sys.mjs";
+import { createFirefoxAgentRuntimePorts } from "./FirefoxAgentRuntimeHost.sys.mjs";
+import { buildClientFromStore, isVisionModel } from "../providers/providers.sys.mjs";
+
+
+const ports = createFirefoxAgentRuntimePorts({
+  config: configStore,
+  conversations: conversationStore,
+  createClient: ({ transport }) =>
+    buildClientFromStore(configStore, { transport, subscriptionAuth }),
+  isVisionModel,
+});
+
+export const agentSession = createAgentRuntime(ports);
+
+export function getRunLog() {
+  return agentSession.getRunLog();
+}

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import MarkdownContent from "./MarkdownContent.jsx";
 
 /**
  * Agent 对话面板（A1+：多轮消息 + 多线程历史持久化）。
@@ -7,8 +8,8 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
  * 使本组件保持纯 UI、可独立打包。
  *
  * @param {object} props
- * @param {() => import("../modules/LlmClient.sys.mjs").LlmClient} props.buildClient
- * @param {import("../modules/ConversationStore.sys.mjs").ConversationStore} props.conversations
+ * @param {() => import("../modules/llm/LlmClient.sys.mjs").LlmClient} props.buildClient
+ * @param {import("../modules/state/ConversationStore.sys.mjs").ConversationStore} props.conversations
  * @param {() => void} [props.onOpenEnvironment]
  * @param {() => void} [props.onOpenSettings]
  */
@@ -18,7 +19,7 @@ const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化�
 
 工具清单与参数你已在 function 列表里看到，这里不重复；只给必须时刻记住的核心，**完整方法论调 \`skill_get\` 读全文**。
 
-【做逆向：先 skill_get】做签名/加密参数逆向前，**先调一次 \`skill_get\`** 把方法论（一页流：决策树→常规执行链 6 步→工具速查）拉进上下文，并自动释放 node 补环境/请求脚手架到工作目录（fs_copy 拿现成改）。开工也先 \`notes_get\` 看本站历史。
+【做逆向：先 skill_get】做签名/加密参数逆向前，**先调一次 \`skill_get\`** 把方法论（一页流：决策树→常规执行链 6 步→工具速查）拉进上下文，并自动释放 node 补环境/请求脚手架到工作目录（fs_copy 拿现成改）。开工也先 \`recall\` 看本站历史。
 
 【通用 Skill】当用户说“使用/按照某个 Skill”时，先用 \`skill_list\` 查可用技能，再用 \`skill_get({name})\` 读取完整说明；需要其 references/assets 时按需调用 \`skill_read_resource\`。不要把 Skill 当成可绕过工具确认的自动执行代码。
 
@@ -28,14 +29,14 @@ const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化�
 
 【阶段门（skill_get §3.5 全文）】严格按 P0侦察→P1定位生成点→**P2 先验证再逆向**→P3判型→P4选策略(黑盒优先)→P5补环境→P6实打验证。**铁律：没用已知输入在浏览器复现出真实 wire 值(P2)前，禁止进字节码反汇编**——逆错对象是最大时间黑洞。**wire 参数 ≠ 最显眼 signer 的输出**(常见 wire=wrapper(signer,其它))，**永远 diff 真实样本**验证；格式/长度/前缀不符=没找对，回上一层。红旗(格式不符/长度对不上/偶尔为空)**必停**别忽略。
 
-【账本而非流水（skill_get §6.5）】维护结构化 \`ledger.md\`：目标定义 / 已确认事实(带证据) / **已否决假设(永不重试)** / 待解问题 / 当前阶段+下一步。**想查/跑某事前先看账本——已确认或已否决里有的，直接用，绝不重新发现/重走死路**（"我来确认下 X"而 X 已在账本=违规）。压缩重启后第一件事按账本"当前阶段+下一步"续，**别从 P0 重侦察**。
+【任务记忆】用 \`remember\` 保存事实、假设、观察、失败路径、决策和产物。确认关键入口、验证参数规则或实验结果、发现有证据的失败条件、形成影响后续路线的重要假设或决策、验证最终产物后立即记录，不要等待压缩或任务结束。只记影响决策的增量信息，避免普通工具流水。fact 必须 verified 且有证据；假设/观察可先 unverified；deadend 必须有证据和适用条件。证据矛盾时保留双方和环境，不擅自升级结论。ledger.md 由系统生成，不直接覆盖。执行前检查现有记忆，必要时 recall；环境变化或证据冲突时重新验证。用户目标以任务卡为准。
 
 【红线】① 最终产物运行时**不靠浏览器跑加密**(node 补环境/纯算都行；开浏览器调 signer 当 runtime=违规。但从浏览器抓的静态 cookie/token 当输入用**不算违规**，那是输入数据)；② \`page_eval\` **全权、别自我设限**——页面里读值/调 signer/**装 hook 记入参出参(「hook 日志大法」:包 \`window.fetch\`/XHR/crypto→交互触发→读 \`window.__log\`)/改全局/注入**都行,是你最趁手的分析工具,别因"应该只读"退回笨重 signer_trace;唯一边界是①(产物不靠浏览器);强检测/JSVMP 站注入**可能被测到**→**自己权衡**换不换引擎层 trace,**不是禁令**；③ 别全量 trace 整页(收窄到 signer 一次调用)；④ 站点无关、标准密码学用库不手搓。
 
 【反绕圈】**⚠ 工具的硬限制 ≠「此路不通」（本 Agent 最大的坑，记牢）**：page_eval 输出被截 / run_node 超时 / 结果被上下文上限截 / fs_read 整读被拦——是**工具用法要换**（**取大源码·\`fn.toString()\` 一律加 \`saveTo:'work/x.js'\` 落盘再 code_search/fs_read**、超时调大、分段读），**不是分析路线死了**；**严禁**因撞工具上限就编个"环境/指纹绕不过"的体面根因、甩"白盒/oracle 二选一"来结案。看到 truncated/被截/只回一截 = 上限、换用法别换策略。 其次：同类报错 / 同一工具撞同一个错 **≥3 次 = 在绕圈** → 别再用同样方式重试，按 skill_get §6 换路线。系统也会在工具结果里给你换路线提示。
 
 【上下文】大结果(trace/大文件/字节码)别整块灌进对话——先落盘、对话留摘要；要细节用 \`fs_read\` 的 offset/limit 分段、\`code_search\` 精搜、或 \`run_node\` 算好只回结论。（长会话堆大会拖慢甚至卡死。）
-【沉淀】每验证通过一个关键结论 → \`notes_add\`（**只记验证过的**），下次同站点复用。结论用「## 结论」小标题：参数在哪生成 · 算法/依赖/指纹输入 · 可独立复现(附可运行 .js/.py + 实打接口返回有效数据)。
+【交付】给最终答复前检查关键发现及产物验证是否已 remember；无需为凑数记录。结论说明参数生成点、算法/依赖/输入、可独立运行产物及实测结果。recall 默认只查本目录；跨目录必须明确指定 scope 与 workspace，历史记忆使用前检查环境和证据。
 
 【自主执行（重要）】
 - 拿到目标先拆成有序子任务清单（一两句列出来）；然后**不间断地逐个完成到全部结束**，每完成一步简述"做了什么/得到什么/下一步"，并**立即继续下一步**，无需等我点头。
@@ -49,7 +50,7 @@ const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化�
 - 给结论用「## 结论」作小标题，简洁直接；别用"实事求是的结论"之类套话/口头禅。`;
 
 // 模式注入块：每条发送时按本会话模式拼到系统提示尾部。
-// 全自动=一条龙跑到底（现状默认）；AI辅助=逐阶段停下跟用户讨论选方向。
+// 全自动=一条龙；AI辅助=用户阶段决策。
 const AUTO_BLOCK = `
 
 【执行模式：全自动】给定目标接口/参数，你**一条龙**自主推进到底（P0 侦察→P1 定位→P2 验证→P3 判型→P4 选策略→P5 补环境→P6 实打验证），不中途停下问我；只有真正需要我提供你拿不到的东西（登录态/账号/验证码/纯业务决策），或任务全部完成（给出可独立实跑、与页面真值对上的产物）时才停。`;
@@ -58,7 +59,7 @@ const ASSIST_BLOCK = `
 
 【执行模式：AI辅助（跟用户协作导航）】偏「逐阶段、跟用户对齐方向」，但**以用户当前的指令为最高优先**——下面 1 永远盖过 2/3 那套「停下给选项」的模板：
 1. **用户给了明确指令/实验/方向时**（例：「跑这个脚本」「别转 oracle/白盒，继续在黑盒上挖」「先做这个实验」）：**照做、做到底、回报具体结果**。**别用「我给你 2-3 个方向你选」这套模板把用户的指令顶掉，更别擅自转去用户刚否掉的方向**。这一轮你就是**执行 + 如实回报**，不是「提案 + 停」；该步内连续多调几个工具把它做完，别做一步就停。回报的是**真实跑出来的结果**，不是为收尾编的结论。
-2. **首轮 / 用户没给明确方向时**：先出一个**简短分阶段方案**（每阶段用什么工具、预期产出），停下问从哪开始（可先调 skill_get/notes_get/page_info 这类只读工具了解现状）。
+2. **首轮 / 用户没给明确方向时**：先出一个**简短分阶段方案**（每阶段用什么工具、预期产出），停下问从哪开始（可先调 skill_get/recall/page_info 这类只读工具了解现状）。
 3. **只在「真分叉」才停下给选项**：你确实被卡死、或确有几条**实质不同**的路且判不准哪条好——这才给 2-3 个候选方向 + 你的推荐让用户选。**严禁为了结束这一轮、为了跳出反复试的循环，就硬造一个分叉、硬下一个体面的「根因」来收尾。**
 4. **结论必须跟着你自己的证据走、不许自相矛盾**：写「根因/结论」前回看本轮自己的输出——你的日志若显示某步**成功了**，就不能写它「失败」；若是「补一个对象、报错就往后挪一步」，那是在**逼近**、不是「死路」。证据没指向某结论就别下，宁可写「还没定论，下一步具体做 X」然后接着做。
 5. 真拿不准、缺登录态/账号/验证码/纯业务决策，才停下问——辅助模式的价值是**用户帮你导航死路**，不是给你每轮找借口收尾。`;
@@ -106,7 +107,7 @@ const ICONS = {
       <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
-  // 模式图标（与上面同风格 line-SVG）：全自动=闪电(一条龙快)、AI辅助=罗盘(领航/选方向)、未选=开关(挑模式)
+  // 模式图标：全自动=闪电、AI辅助=罗盘、未选=开关。
   modeAuto: (
     <svg {...svgProps}>
       <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
@@ -150,7 +151,7 @@ function ToolStep({ step }) {
 function TextSeg({ step, live }) {
   return (
     <div className="msg__textseg">
-      {step.text}
+      <MarkdownContent>{step.text}</MarkdownContent>
       {live ? <span className="msg__cursor">▌</span> : null}
     </div>
   );
@@ -162,7 +163,7 @@ function ThinkSeg({ step, live }) {
     <details className="msg__think" open>
       <summary className="msg__think-label">💭 思考过程</summary>
       <div className="msg__think-body">
-        {step.text}
+        <MarkdownContent>{step.text}</MarkdownContent>
         {live ? <span className="msg__cursor">▌</span> : null}
       </div>
     </details>
@@ -170,7 +171,7 @@ function ThinkSeg({ step, live }) {
 }
 
 // 渲染 steps：正文段/思考段始终显示；工具步骤按 hideTools 折叠。live 时给最后一段加光标。
-function StepList({ steps, hideTools, live }) {
+export function StepList({ steps, hideTools, live }) {
   return steps.map((s, j) => {
     if (s.kind === "tool") {
       return hideTools ? null : <ToolStep key={j} step={s} />;
@@ -178,29 +179,34 @@ function StepList({ steps, hideTools, live }) {
     if (s.kind === "think") {
       return <ThinkSeg key={j} step={s} live={live && j === steps.length - 1} />;
     }
+    if (s.kind !== "text") return null;
     return <TextSeg key={j} step={s} live={live && j === steps.length - 1} />;
   });
 }
 
 // 完成态 assistant 消息体：默认展开全过程；收起后**只保留最后一段（结论）**，思考/工具/中间正文一并收齐
-function AssistantBody({ steps, content }) {
+export function AssistantBody({ steps, content }) {
   const [collapsed, setCollapsed] = useState(false);
-  if (!steps || !steps.length) {
-    return <div className="msg__content">{content}</div>;
+  // Older conversations may contain step kinds from removed runtime modes.
+  const visibleSteps = Array.isArray(steps)
+    ? steps.filter(step => ["text", "think", "tool"].includes(step.kind))
+    : [];
+  if (!visibleSteps.length) {
+    return <div className="msg__content"><MarkdownContent>{content}</MarkdownContent></div>;
   }
-  const toolCount = steps.filter(s => s.kind === "tool").length;
+  const toolCount = visibleSteps.filter(s => s.kind === "tool").length;
   // 最后一段正文（最终结论）的下标
   let lastTextIdx = -1;
-  for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i].kind === "text") {
+  for (let i = visibleSteps.length - 1; i >= 0; i--) {
+    if (visibleSteps[i].kind === "text") {
       lastTextIdx = i;
       break;
     }
   }
   // 有「过程」可收起：含工具/思考，或正文不止一段
   const collapsible =
-    steps.some(s => s.kind !== "text") || steps.filter(s => s.kind === "text").length > 1;
-  const shown = collapsed ? (lastTextIdx >= 0 ? [steps[lastTextIdx]] : steps.slice(-1)) : steps;
+    visibleSteps.some(s => s.kind !== "text") || visibleSteps.filter(s => s.kind === "text").length > 1;
+  const shown = collapsed ? (lastTextIdx >= 0 ? [visibleSteps[lastTextIdx]] : visibleSteps.slice(-1)) : visibleSteps;
   return (
     <div className="msg__content">
       <StepList steps={shown} hideTools={false} />
@@ -261,13 +267,17 @@ const _CC = typeof Components !== "undefined" ? Components.classes : typeof Cc !
 const _CI = typeof Components !== "undefined" ? Components.interfaces : typeof Ci !== "undefined" ? Ci : null;
 const _SVC = typeof Services !== "undefined" ? Services : null;
 
-export default function AgentPanel({ buildClient, conversations, store, router, runAgentTurn, session, isVisionModel, workspace, notes, skill, toolNames = [], onOpenEnvironment, onOpenSettings, hidden = false }) {
+export default function AgentPanel({ buildClient, conversations, store, router, runAgentTurn, session, isVisionModel, workspace, skill, toolNames = [], onOpenEnvironment, onOpenSettings, hidden = false }) {
+  const [memoryView, setMemoryView] = useState(null);
+  const [taskCompleted, setTaskCompleted] = useState(false);
   const [messages, setMessages] = useState([]); // 仅 user/assistant
   const [threads, setThreads] = useState([]); // 摘要列表
   const [currentId, setCurrentId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [steerState, setSteerState] = useState(null);
+  const sendingRef = useRef(false);
   const [activeTool, setActiveTool] = useState(null);
   const [pendingConfirm, setPendingConfirm] = useState(null);
   const [liveSteps, setLiveSteps] = useState([]); // 本回合进行中的过程步骤（累积，不覆盖）
@@ -276,7 +286,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   const [cancellationPending, setCancellationPending] = useState(false);
   const [usage, setUsage] = useState(null);
   const [workspaceDir, setWorkspaceDir] = useState(null); // 当前会话绑定的工作目录
-  const [mode, setMode] = useState(null); // 本会话执行模式："auto"=全自动一条龙 / "assist"=AI辅助逐阶段 / null=未选（首次新建会话让用户选）
+  const [mode, setMode] = useState(null); // auto=全自动 / assist=用户领航 / null=未选
   const [files, setFiles] = useState([]); // 工作目录文件列表（展开时填充）
   const [filesOpen, setFilesOpen] = useState(false);
   const listRef = useRef(null);
@@ -353,6 +363,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         if (!cancelled && t) {
           setCurrentId(t.id);
           setMessages(t.messages || []);
+          setMemoryView({ threadId: t.id, status: t.memoryCompletion?.status, message: t.memoryCompletion?.message });
           setCancellationPending(t.cancellationPending === true);
           setUsage(t.usage || null);
           bindWorkspace(effectiveWorkspace(t));
@@ -439,6 +450,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         return;
       }
       const snap = session.getState(currentId);
+      if (snap) {
+        setTaskCompleted(snap.taskCompleted === true);
+        if (snap.memoryCompletion) setMemoryView({ threadId: currentId, ...snap.memoryCompletion });
+      }
+      if (snap) setSteerState({ threadId: currentId, items: snap.steering || [], accepting: snap.acceptingSteer });
       if (snap && snap.running) {
         // 上下文压缩落盘了一条 checkpoint 回复 → 从 store 重载历史(新气泡出现)，live 区随即显示新段。
         if ((snap.checkpointSeq || 0) > lastCkpt) {
@@ -448,6 +464,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             .then(t => {
               if (t) {
                 setMessages(t.messages);
+                setMemoryView({ threadId: t.id, status: t.memoryCompletion?.status, message: t.memoryCompletion?.message });
                 setCancellationPending(t.cancellationPending === true);
                 setUsage(t.usage || null);
               }
@@ -480,6 +497,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           .then(t => {
             if (t) {
               setMessages(t.messages);
+              setMemoryView({ threadId: t.id, status: t.memoryCompletion?.status, message: t.memoryCompletion?.message });
               setCancellationPending(t.cancellationPending === true);
               setUsage(t.usage || null);
             }
@@ -788,14 +806,44 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     }
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) {
+  function submitMessage() {
+    if (session?.isRunning(currentId)) {
+      const text = input.trim();
+      if (!text) return;
+      try {
+        const receipt = session.steer(currentId, text);
+        if (!receipt.ok) {
+          setError(receipt.error);
+          return;
+        }
+        setInput("");
+        setError(null);
+        const snap = session.getState(currentId);
+        setSteerState({ threadId: currentId, items: snap.steering || [], accepting: snap.acceptingSteer });
+      } catch (error) {
+        setError(error.message || String(error));
+      }
       return;
     }
+    if (busy) {
+      setError("任务正在启动或收尾，请稍后发送");
+      return;
+    }
+    void send();
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy || sendingRef.current) {
+      return;
+    }
+    sendingRef.current = true;
+    setSteerState(null);
     setError(null);
     setNotice(null);
     const userMsg = { role: "user", content: text };
+    setTaskCompleted(false);
+    setMemoryView(null);
     setMessages([...messages, userMsg]); // 乐观显示；发给模型的权威历史下面从持久化 store 读
     setInput("");
     resetSteps();
@@ -816,7 +864,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         /* 取不到就用乐观值 */
       }
       // Stable provider-cache prefix: only invariant policy stays in system.
-      // Workspace, notes, and Skill catalog are attached to the current user
+      // Workspace and Skill catalog are attached to the current user
       // message by AgentLoop as dynamic context.
       let sys = SYSTEM +
         "\n\n【浏览器环境】环境隔离、指纹配置和 MCP 指定环境由 env_* 工具链处理；Agent 对话页不做环境选择。";
@@ -840,14 +888,6 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         }
       }
       sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
-      try {
-        const dg = notes && notes.digest ? await notes.digest({}) : "";
-        if (dg) {
-          dynamicParts.push(dg);
-        }
-      } catch {
-        /* 笔记可选，取不到不影响 */
-      }
       // 只注入 Skill 元数据，正文由 Agent 按需 skill_get，避免每轮把整个知识库塞进上下文。
       try {
         const catalog = skill && skill.list
@@ -865,19 +905,24 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         setBusy(true); // → 触发轮询 useEffect 流式刷 UI
         // 引擎在常驻模块跑：切侧栏面板重载也不中断；UI 由轮询驱动(见上面 useEffect)，
         // done/error 由引擎自己落盘，故这里**不 await、不 finalize**。
-        // assist=AI辅助逐阶段：引擎不跨回合自动续（每个 turn 结束交回用户等其选方向）。
+        // assist 交回用户决策；auto 持续执行到终态。
         // run() 返回 Promise；同步启动后由常驻 session 自己收尾。catch 防止启动前异常成为未处理 rejection。
         void session.run(tid, { systemPrompt: sys, dynamicContext: dynamicParts.join("\n\n"), convo, confirmMode, assist: effMode === "assist", maxRounds: 80, maxPerTool: 40,
           // 工作目录随会话注入到每条工具调用的 ctx，WorkspaceBackend 优先使用 ctx.workspaceRoot，
           // 实现多窗口/多会话并发时各自操作各自的目录、互不干扰。
           workspaceRoot: workspaceDir || null,
-          // 把**本侧栏所在的 chrome 窗口**注入 ctx.win——所有定位标签页的工具(page_eval/导航/点击/
-          // webapi/jsvmp trace/signer_trace/whitebox)优先打**本窗口**的当前 tab，而非"全局聚焦窗口"，
-          // 两个浏览器窗口并发跑各自的 Agent 时互不打错 tab。topChromeWindow 不随焦点变。
-          win: (typeof window !== "undefined" && window.browsingContext && window.browsingContext.topChromeWindow) || null,
+          // Runtime 只接收不透明 hostContext；Firefox Host 再将它适配为 backend 的 ctx.win。
+          // topChromeWindow 不随焦点变化，两个窗口并发时不会把工具打到另一个窗口。
+          hostContext: {
+            win:
+              (typeof window !== "undefined" &&
+                window.browsingContext &&
+                window.browsingContext.topChromeWindow) ||
+              null,
+          },
         }).catch(e => setError((e && e.message) || String(e)));
       } else {
-        // 无 session 兜底（不跨重载）：直接 chat。
+        // 无 session 兜底（不跨重载）：直接单模型 chat。
         setBusy(true);
         let cancelledBoundary = false;
         try {
@@ -910,6 +955,8 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     } catch (e) {
       setError((e?.message || String(e)) + (e?.body ? "\n— " + String(e.body).slice(0, 600) : ""));
       setBusy(false);
+    } finally {
+      sendingRef.current = false;
     }
   }
 
@@ -917,8 +964,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   function stopRun() {
     try {
       if (session && currentId) {
+        const completed = session.getState(currentId)?.taskCompleted;
         session.stop(currentId);
-        setCancellationPending(true);
+        if (!completed) setCancellationPending(true);
       } else if (abortRef.current) {
         abortRef.current.abort();
         setCancellationPending(true);
@@ -934,13 +982,15 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       session.acquireThread([t.id], ownerRef.current); // 认领新线程（预留）→ 别的窗口认领不到，不会串对话
     }
     setCurrentId(t.id);
+    setTaskCompleted(false);
+    setMemoryView(null);
     setMessages([]);
     setCancellationPending(false);
     setUsage(null);
     setError(null);
     setShowHistory(false);
     bindWorkspace(effectiveWorkspace(t));
-    setMode(null); // 新会话未选模式 → 空状态里弹「全自动 / AI辅助」选择卡
+    setMode(null); // 新会话未选模式 → 空状态里弹两种执行策略
     // 清掉上一条会话的「正在跑」实时显示（busy/liveSteps/活动工具/确认）——否则旧会话还在后台跑时
     // 一点新建，新会话会赖着上一个 agent 的实时界面（旧引擎不中断、继续后台跑，切回去即续看）。
     setBusy(false);
@@ -962,7 +1012,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       /* 持久化失败不影响本会话内生效 */
     }
   }
-  // 顶部 chip：手动切换模式（全自动 ⇄ AI辅助），随时可改。
+  // 顶部 chip：两种策略循环切换，按会话持久化。
   function toggleMode() {
     chooseMode(mode === "assist" ? "auto" : "assist");
   }
@@ -981,6 +1031,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     if (t) {
       setCurrentId(t.id);
       setMessages(t.messages);
+      setMemoryView({ threadId: t.id, status: t.memoryCompletion?.status, message: t.memoryCompletion?.message });
       setCancellationPending(t.cancellationPending === true);
       setUsage(t.usage || null);
       setError(null);
@@ -1066,9 +1117,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   }
 
   function onKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      send();
+      submitMessage();
     }
   }
 
@@ -1098,7 +1149,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           type="button"
           onClick={() => { setExtRunning(null); openThread(extRunning.id); }}
           title="外部(MCP)正在驱动另一个会话——点击切过去实时查看进度"
-          style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid rgba(106,140,255,0.3)", background: "rgba(106,140,255,0.15)", color: "#6a8cff", padding: "6px 12px", cursor: "pointer", fontSize: "12px" }}
+          style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid rgba(106,140,255,0.3)", background: "rgba(106,140,255,0.15)", color: "#6a8cff", padding: "6px 12px", cursor: "pointer", fontSize: "calc(12px * var(--frx-font-scale, 1))" }}
         >
           ⚡ 外部(MCP)正在驱动另一个会话（{extRunning.nSteps} 步）· 点击实时跟随
         </button>
@@ -1133,16 +1184,26 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           onClick={toggleMode}
           title={
             mode === "assist"
-              ? "AI辅助模式：逐阶段停下跟你讨论选方向（点击切到全自动）"
+              ? "AI辅助：阶段门交给你决策（点击切到全自动）"
               : mode === "auto"
-              ? "全自动模式：一条龙跑到底（点击切到AI辅助）"
+              ? "全自动：一条龙跑到底（点击切到AI辅助）"
               : "点击选择执行模式（全自动 / AI辅助）"
           }
         >
           <span className="agent-ws__mode-ico" aria-hidden="true">
-            {mode === "assist" ? ICONS.modeAssist : mode === "auto" ? ICONS.modeAuto : ICONS.modeUnset}
+            {mode === "assist"
+              ? ICONS.modeAssist
+              : mode === "auto"
+              ? ICONS.modeAuto
+              : ICONS.modeUnset}
           </span>
-          <span>{mode === "assist" ? "AI辅助" : mode === "auto" ? "全自动" : "选模式"}</span>
+          <span>
+            {mode === "assist"
+              ? "AI辅助"
+              : mode === "auto"
+              ? "全自动"
+              : "选模式"}
+          </span>
         </button>
         <span
           className="agent-ws__usage"
@@ -1254,7 +1315,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             )}
           </div>
         ))}
-        {busy && (
+        {busy && !taskCompleted && (
           <div className="msg msg--assistant">
             <div className="msg__role">Agent助手</div>
             {liveSteps.length > 0 ? (
@@ -1269,6 +1330,18 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           </div>
         )}
       </div>
+
+      {memoryView?.threadId === currentId && memoryView.status && memoryView.status !== "idle" && (
+        <div className="agent-panel__tools-hint" role="status" aria-live="polite" data-memory-status={memoryView.status}>
+          {memoryView.status === "extracting" ? "记忆整理中…" :
+            memoryView.message || ({
+              saved: "记忆已保存",
+              no_verified: "记忆检查完成，暂无已验证记录",
+              pending: "记忆待重试：下次继续本任务时重试",
+              skipped: "当前目录已有已验证记忆，已跳过完成检查",
+            })[memoryView.status]}
+        </div>
+      )}
 
       {pendingConfirm && (
         <div className="agent-confirm">
@@ -1298,21 +1371,32 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
 
       {error && <div className="agent-panel__error">⚠ {error}</div>}
 
+      {steerState?.threadId === currentId && steerState.items.length > 0 && (
+        <div className="agent-panel__notice agent-panel__steering" aria-live="polite">
+          {steerState.items.map(item => (
+            <div key={item.id} title={item.content}>
+              {({ queued: "等待安全边界", applying: "正在投递", applied: "已加入上下文", cancelled: "未生效（任务已结束）" })[item.status]}
+              ：{item.content.length > 100 ? item.content.slice(0, 100) + "…" : item.content}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="agent-panel__input">
         <textarea
           value={input}
-          placeholder={busy ? "执行中…可继续输入，停止后或本轮结束再发送" : "输入消息，Enter 发送，Shift+Enter 换行"}
+          placeholder={busy ? "输入补充指令，Enter 引导当前任务；停止请点「停止」" : "输入消息，Enter 发送，Shift+Enter 换行"}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={2}
         />
-        {busy ? (
-          <button type="button" className="agent-panel__stop" onClick={stopRun} title="停止自主执行">
+        <button type="button" onClick={submitMessage}
+          disabled={!input.trim() || (busy && (!session?.steer || !steerState?.accepting))}
+          title={busy ? "投递到当前任务，在下一个安全边界生效" : "开始新一轮任务"}>
+          {busy ? "引导" : "发送"}
+        </button>
+        {busy && (
+          <button type="button" className="agent-panel__stop" onClick={stopRun} title="取消当前任务及未生效的引导">
             停止
-          </button>
-        ) : (
-          <button type="button" onClick={send} disabled={!input.trim()}>
-            发送
           </button>
         )}
       </div>

@@ -20,16 +20,29 @@ run() {
 run npm --prefix "$SIDEBAR_DIR" run build
 
 SELFTESTS=(
+  selftest-markdown.mjs
   selftest-addons.mjs
+  selftest-agent-runtime-core.mjs
+  selftest-agent-runtime-factory.mjs
+  selftest-agent-steer.mjs
+  selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
+  selftest-typography.mjs
   selftest-mozbuild.mjs
   selftest-providers.mjs
+  selftest-subscription.mjs
   selftest-usage.mjs
   selftest-prompt-cache.mjs
   selftest-conversations.mjs
+  selftest-memory-contract.mjs
+  selftest-completion-memory.mjs
   selftest-ledger-sql.mjs
-  selftest-context-projection.mjs
+  selftest-ledger-shutdown.mjs
+  selftest-llm-architecture.mjs
+  selftest-context-migration.mjs
   selftest-context-runtime.mjs
+  selftest-unified-context.mjs
+  selftest-thinking-context.mjs
   selftest-skills.mjs
   selftest-stream.mjs
   selftest-retry.mjs
@@ -38,6 +51,7 @@ SELFTESTS=(
   selftest-thread-reservation.mjs
   selftest-workspace.mjs
   selftest-environment.mjs
+  selftest-native-fingerprint.mjs
   selftest-e2e.mjs
 )
 

@@ -1,8 +1,11 @@
 /* Verify the strict case-insensitive ordering required by Mozilla moz.build. */
 import fs from "node:fs";
+import assert from "node:assert/strict";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mozBuildPath = fileURLToPath(new URL("../moz.build", import.meta.url));
+const modulesPath = fileURLToPath(new URL("../modules/", import.meta.url));
 const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
 const localePrefsPath = fileURLToPath(new URL("../preferences/frx-locale.js", import.meta.url));
 const localeMozBuildPath = fileURLToPath(new URL("../preferences/moz.build", import.meta.url));
@@ -14,24 +17,64 @@ const buildRelinkPath = fileURLToPath(new URL("../../../../../scripts/force-buil
 const source = fs.readFileSync(mozBuildPath, "utf8");
 const localeMozBuild = fs.readFileSync(localeMozBuildPath, "utf8");
 const packageVersion = JSON.parse(fs.readFileSync(packagePath, "utf8")).version;
-const block = source.match(/EXTRA_JS_MODULES\.agentsidebar\s*\+=\s*\[([\s\S]*?)\n\]/);
-
-if (!block) {
-  console.error("FAIL: EXTRA_JS_MODULES.agentsidebar block not found");
-  process.exit(1);
-}
-
-const entries = [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-const sorted = [...entries].sort((left, right) => {
+const blocks = [...source.matchAll(/EXTRA_JS_MODULES\.agentsidebar((?:\.\w+)*)\s*\+=\s*\[([\s\S]*?)\n\]/g)];
+assert.ok(blocks.length, "moz.build must register Agent modules");
+const compare = (left, right) => {
   const a = left.toLowerCase();
   const b = right.toLowerCase();
   return a < b ? -1 : a > b ? 1 : 0;
-});
-
-if (JSON.stringify(entries) !== JSON.stringify(sorted)) {
-  console.error("FAIL: moz.build module list is not sorted");
-  console.error("expected:", sorted.join("\n"));
+};
+const entries = [];
+const installed = new Map();
+const resourceRoot = "resource:///modules/agentsidebar/";
+for (const [, suffix, body] of blocks) {
+  const groupEntries = [...body.matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(groupEntries, [...groupEntries].sort(compare), "moz.build group must be sorted");
+  const destination = suffix.slice(1).replaceAll(".", "/");
+  assert.ok(destination && destination !== "compat", "Agent modules must use responsibility-based directories");
+  for (const entry of groupEntries) {
+    const url = resourceRoot + (destination ? destination + "/" : "") + path.posix.basename(entry);
+    assert.equal(installed.has(url), false, "duplicate installed URL: " + url);
+    const expectedDir = "modules/" + destination;
+    assert.equal(path.posix.dirname(entry), expectedDir, "source and packaged directory disagree");
+    installed.set(url, entry);
+    entries.push(entry);
+  }
+}
+function moduleFiles(directory, prefix = "modules") {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const relative = prefix + "/" + entry.name;
+    if (entry.isDirectory()) return moduleFiles(path.join(directory, entry.name), relative);
+    return entry.name.endsWith(".sys.mjs") ? [relative] : [];
+  });
+}
+const sourceModules = moduleFiles(modulesPath).sort();
+const registeredModules = [...entries].sort();
+if (JSON.stringify(sourceModules) !== JSON.stringify(registeredModules)) {
+  const missing = sourceModules.filter(name => !registeredModules.includes(name));
+  const stale = registeredModules.filter(name => !sourceModules.includes(name));
+  console.error("FAIL: moz.build does not exactly match modules/**/*.sys.mjs");
+  if (missing.length) console.error("unregistered:", missing.join(", "));
+  if (stale.length) console.error("missing source:", stale.join(", "));
   process.exit(1);
+}
+
+// Resolve imports against the *installed* URL graph. Merely checking source
+// imports would miss moz.build accidentally flattening a nested directory.
+const sidebarPath = path.dirname(modulesPath);
+for (const [url, entry] of installed) {
+  const moduleSource = fs.readFileSync(path.join(sidebarPath, entry), "utf8");
+  const references = [...moduleSource.matchAll(/["']((?:\.{1,2}\/|resource:\/\/\/modules\/agentsidebar\/)[^"'\s]+\.sys\.mjs)["']/g)];
+  for (const [, specifier] of references) {
+    const resolved = new URL(specifier, url).href;
+    assert.ok(installed.has(resolved), url + " imports missing " + resolved);
+  }
+}
+for (const name of ["index.jsx", "AgentPanel.jsx", "EnvironmentPane.jsx"]) {
+  const uiSource = fs.readFileSync(path.join(sidebarPath, "content", name), "utf8");
+  for (const [url] of uiSource.matchAll(/resource:\/\/\/modules\/agentsidebar\/[A-Za-z/]+\.sys\.mjs/g)) {
+    assert.ok(installed.has(url), name + " imports missing " + url);
+  }
 }
 
 if (!source.includes('DIRS += ["preferences"]')) {

@@ -9,8 +9,8 @@ import {
   normalizeBaseUrl,
   resolveChatPath,
   buildClientFromStore,
-} from "../modules/providers.sys.mjs";
-import { ConfigStore } from "../modules/ConfigStore.sys.mjs";
+} from "../modules/providers/providers.sys.mjs";
+import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
 
 let fail = 0;
 function check(name, got, want) {
@@ -82,6 +82,22 @@ check("命名配置 B 读取独立模型", profileClient.model, "model-b");
 cs.setActiveModelProfileId(accountA.id);
 profileClient = buildClientFromStore(cs);
 check("切回命名配置 A", [profileClient.apiKey, profileClient.model], ["key-a", "model-a"]);
+// 当前命名配置的空 Key 不应从同 provider 的旧配置回退。
+cs.createModelProfile({
+  name: "空 Key",
+  provider: "custom",
+  apiKey: "",
+  baseUrl: "https://empty.example.com/v1",
+  protocol: "openai",
+  model: "empty-key-model",
+});
+profileClient = buildClientFromStore(cs);
+check("当前配置空 Key 不回退旧 Key", profileClient.apiKey, "");
+check(
+  "当前配置的端点和模型保持隔离",
+  [profileClient.endpoint, profileClient.model],
+  ["https://empty.example.com/v1/chat/completions", "empty-key-model"]
+);
 
 // ---- mock server ----
 const MODELS = { data: [{ id: "m-alpha" }, { id: "m-beta" }] };
