@@ -134,7 +134,9 @@ export async function createUnifiedTurnContext({
     let detail = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
-      const maxTokens = Math.min(room, attempt ? retryOutput : firstOutput);
+      const attemptRoom = windowTokens - messagesTokens(request) - summarySafety;
+      const maxTokens = Math.min(attemptRoom, attempt ? retryOutput : firstOutput);
+      if (maxTokens <= 0) throw new Error(phase + " request exceeds model context budget");
       const res = await client.chat(request, {
         signal, maxTokens, cacheKey: cacheKey ? cacheKey + ":unified-" + phase : "",
       });
@@ -154,6 +156,13 @@ export async function createUnifiedTurnContext({
         ", reasoningChars=" + String(res?.reasoningContent || "").length +
         ", maxTokens=" + maxTokens + (validation ? ", validation=" + validation : "");
       emit({ type: "context_summary_retry", phase, attempt: attempt + 1, detail });
+      if (!attempt) {
+        const feedback = validation
+          ? `上次摘要未通过结构校验：${validation}。`
+          : "上次摘要为空或输出被截断。";
+        request[1] = { role: "user", content: content + "\n\n" + feedback +
+          "请根据以上原始输入重新生成完整 JSON，严格遵守结构契约；保持简洁，不得为通过校验升级事实状态或编造证据。" };
+      }
     }
     const error = new Error("上下文压缩失败：模型连续两次未返回符合结构契约的完整摘要；原始记录和旧摘要已保留。" +
       " (" + phase + ": " + detail + ")");

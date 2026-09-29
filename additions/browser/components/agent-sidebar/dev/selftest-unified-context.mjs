@@ -432,3 +432,36 @@ assert.equal(budgetCtx.journal.compaction.tokensAfter,
   messagesTokens(budgetView) + estimateTokens(budgetToolSpecs));
 budgetCtx.requestMessages(budgetView);
 console.log("OK trigger and committed token counts use the same full-request budget");
+
+const invalidStatusHandoff = JSON.parse(handoffJson("state"));
+invalidStatusHandoff.hypotheses = [{ text: "needs checking", status: "pending", evidenceIds: [] }];
+let statusAttempts = 0;
+const statusRetry = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    statusAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    assert.match(request[0].content, /verified、unverified、rejected、superseded/);
+    if (statusAttempts === 1) return { content: JSON.stringify(invalidStatusHandoff), finishReason: "stop" };
+    assert.match(request[1].content, /invalid memory status/);
+    assert.match(request[1].content, /不得为通过校验升级事实状态/);
+    const corrected = structuredClone(invalidStatusHandoff);
+    corrected.hypotheses[0].status = "unverified";
+    return { content: JSON.stringify(corrected), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+await statusRetry.forceCompact(1, statusRetry.initialMessages);
+assert.equal(statusAttempts, 2);
+assert.equal(statusRetry.journal.compaction.handoff.memories[0].status, "unverified");
+
+const invalidStatusOnly = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat() { return { content: JSON.stringify(invalidStatusHandoff), finishReason: "stop" }; } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+const invalidStatusEvents = structuredClone(invalidStatusOnly.journal.events);
+await assert.rejects(invalidStatusOnly.forceCompact(1, invalidStatusOnly.initialMessages), /invalid memory status/);
+assert.equal(invalidStatusOnly.journal.compaction, null);
+assert.deepEqual(invalidStatusOnly.journal.events, invalidStatusEvents);
+console.log("OK invalid status receives budgeted repair feedback without weakening validation or losing history");
