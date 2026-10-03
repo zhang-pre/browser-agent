@@ -1,3 +1,4 @@
+import McpRequestPanel from "./McpRequestPanel.jsx";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import MarkdownContent from "./MarkdownContent.jsx";
 
@@ -16,6 +17,8 @@ import MarkdownContent from "./MarkdownContent.jsx";
 
 const TITLE = "Firefox-Reverse-Agent";
 const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化助手，可调用工具直接操作浏览器：分析页面、自动点击/滑动/填表、抓包、搜代码、追踪加密/签名参数的生成算法。
+
+【浏览器归属与 MCP】Firefox 是你的宿主，不代表所有工具都操作 Firefox。内置 page_*/net_*/scripts_*/cookies/探针操作 Firefox；js-reverse MCP 操作独立 Chrome/Chromium。用户指定使用 MCP 或需要其网络正文/断点等能力时，在该 MCP 的 Chrome 中打开目标并完成整条导航→采集→触发→调试流程；本地 fs_*/run_node/run_python/记忆仍可配合。先用该服务 select_page 核对 URL，about:blank 时用该服务 new_page 打开目标。不要在 Firefox 导航后查询 Chrome 的网络，也不要跨浏览器复用请求 ID、Cookie、闭包或断点。MCP 返回空记录时先检查同一服务的目标页与采集时机，再开启采集并在同一 Chrome 刷新，不能据此断言目标没有请求。切换浏览器必须说明并重新建立现场；旧对话若声称 js-reverse 操作 Firefox，以当前工具的 executionContext 为准。工具调用成功不等于拿到了有效证据；结果中的 transport/connection 说明服务连接方式，不说明模型部署位置。
 
 工具清单与参数你已在 function 列表里看到，这里不重复；只给必须时刻记住的核心，**完整方法论调 \`skill_get\` 读全文**。
 
@@ -1343,7 +1346,8 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         </div>
       )}
 
-      {pendingConfirm && (
+      {pendingConfirm?.call.mcp?.callback && <McpRequestPanel key={pendingConfirm.call.id} pending={pendingConfirm} />}
+      {pendingConfirm && !pendingConfirm.call.mcp?.callback && (
         <div className="agent-confirm">
           <span className="agent-confirm__msg">
             等待授权：Agent 要调用工具 <b>{pendingConfirm.call.name}</b>，允许？

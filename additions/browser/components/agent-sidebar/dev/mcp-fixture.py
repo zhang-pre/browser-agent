@@ -52,7 +52,16 @@ if "--http" in sys.argv:
     server.serve_forever()
 else:
     print("fixture diagnostics on stderr only", file=sys.stderr, flush=True)
+    roots_parent = None
     for line in sys.stdin:
-        result = respond(json.loads(line))
+        message = json.loads(line)
+        if message.get("method") == "tools/call" and message["params"].get("name") == "native_roots":
+            roots_parent = message["id"]
+            print(json.dumps({"jsonrpc": "2.0", "id": "native-roots", "method": "roots/list"}), flush=True)
+            continue
+        if message.get("id") == "native-roots" and "method" not in message:
+            result = {"jsonrpc": "2.0", "id": roots_parent, "result": {"content": [{"type": "text", "text": json.dumps(message.get("result"))}]}}
+        else:
+            result = respond(message)
         if result:
             print(json.dumps(result), flush=True)

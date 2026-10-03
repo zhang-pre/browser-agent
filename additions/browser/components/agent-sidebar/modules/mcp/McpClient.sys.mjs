@@ -3,6 +3,13 @@
  * No OAuth, legacy HTTP+SSE endpoint discovery, or automatic invocation replay. */
 export const MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
 const fail = message => new Error(message);
+export function sanitizeMcpDiagnostic(value, redact, depth = 0) {
+  if (typeof value === "string") return redact(value).slice(0, 8000);
+  if (depth > 8) return "[truncated]";
+  if (Array.isArray(value)) return value.slice(0, 100).map(item => sanitizeMcpDiagnostic(item, redact, depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [redact(key), sanitizeMcpDiagnostic(item, redact, depth + 1)]));
+  return value;
+}
 
 export function createJsonLineParser(onMessage, { onError = error => { throw error; }, maxBufferChars = 8 * 1024 * 1024 } = {}) {
   let buffer = "", failed = false;
@@ -32,9 +39,10 @@ export function createJsonLineParser(onMessage, { onError = error => { throw err
 }
 
 export class McpClient {
-  constructor({ transport, timeoutMs = 30000, clientInfo = { name: "browser-agent", version: "1.0" }, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout, onNotification = null } = {}) {
+  constructor({ transport, timeoutMs = 120000, clientInfo = { name: "browser-agent", version: "1.0" }, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout, onNotification = null, onRequest = null, capabilities = {}, redact = value => value } = {}) {
     this.transport = transport; this.timeoutMs = timeoutMs; this.clientInfo = clientInfo;
     this.setTimeout = setTimeout; this.clearTimeout = clearTimeout; this.onNotification = onNotification;
+    this.onRequest = onRequest; this.capabilities = capabilities; this.redact = redact; this.incoming = new Map();
     this.pending = new Map(); this.operations = new Set(); this.nextId = 0; this.connected = false; this.closed = false;
   }
   async connect({ signal } = {}) {
@@ -44,7 +52,7 @@ export class McpClient {
     this.connecting = (async () => {
       try {
         await this._bounded(() => this.transport.start(message => this._receive(message), () => this.close(fail("MCP connection closed"))), signal);
-        const result = await this.request("initialize", { protocolVersion: MCP_PROTOCOL_VERSIONS[0], capabilities: {}, clientInfo: this.clientInfo }, { signal });
+        const result = await this.request("initialize", { protocolVersion: MCP_PROTOCOL_VERSIONS[0], capabilities: this.capabilities, clientInfo: this.clientInfo }, { signal });
         if (!MCP_PROTOCOL_VERSIONS.includes(result?.protocolVersion)) throw fail("Unsupported MCP protocol version");
         if (!result.capabilities || typeof result.capabilities !== "object") throw fail("Invalid MCP initialization result");
         this.transport.setProtocolVersion?.(result.protocolVersion);
@@ -86,7 +94,7 @@ export class McpClient {
         }
       };
       const abort = () => cancel("MCP request cancelled");
-      const timer = this.setTimeout(() => cancel("MCP request timed out"), timeoutMs);
+      const timer = this.setTimeout(() => cancel("MCP request timed out; remote effects may already have occurred; invocation was not retried"), timeoutMs);
       this.pending.set(id, { done, controller });
       signal?.addEventListener("abort", abort, { once: true });
       Promise.resolve().then(() => {
@@ -100,14 +108,31 @@ export class McpClient {
     if (!message || Array.isArray(message) || message.jsonrpc !== "2.0") { this.close(fail("Invalid MCP message")); return; }
     if (typeof message.method === "string") {
       if (message.id !== undefined) {
-        const response = message.method === "ping" ? { result: {} } : { error: { code: -32601, message: "Client method not supported" } };
-        Promise.resolve().then(() => this.transport.send({ jsonrpc: "2.0", id: message.id, ...response })).catch(() => this.close());
-      } else { try { this.onNotification?.(message); } catch { /* consumer isolation */ } }
+        const controller = new AbortController();
+        this.incoming.set(message.id, controller);
+        Promise.resolve().then(async () => {
+          if (message.method === "ping") return {};
+          if (!this.onRequest) throw Object.assign(fail("Client method not supported"), { code: -32601 });
+          return this.onRequest(message.method, message.params || {}, { signal: controller.signal });
+        }).then(result => ({ result }), error => ({ error: {
+          code: Number.isInteger(error.code) ? error.code : -32603,
+          message: this.redact(String(error.message || "Client request failed")).slice(0, 4000),
+        } })).then(response => {
+          if (!this.closed && !controller.signal.aborted) return this.transport.send({ jsonrpc: "2.0", id: message.id, ...response });
+        }).catch(() => this.close()).finally(() => this.incoming.delete(message.id));
+      } else {
+        if (message.method === "notifications/cancelled") this.incoming.get(message.params?.requestId)?.abort();
+        try { this.onNotification?.(message); } catch { /* consumer isolation */ }
+      }
       return;
     }
     const pending = this.pending.get(message.id);
     if (!pending) return;
-    if (message.error) pending.done(fail(`MCP server error (${Number.isInteger(message.error.code) ? message.error.code : "unknown"})`));
+    if (message.error) {
+      const error = fail(`MCP server error (${Number.isInteger(message.error.code) ? message.error.code : "unknown"}): ${this.redact(String(message.error.message || "Unknown server error")).slice(0, 4000)}`);
+      error.mcpError = { code: message.error.code, ...(message.error.data !== undefined ? { data: JSON.stringify(sanitizeMcpDiagnostic(message.error.data, this.redact)).slice(0, 8000) } : {}) };
+      pending.done(error);
+    }
     else if (Object.hasOwn(message, "result")) pending.done(null, message.result);
     else pending.done(fail("Invalid MCP response"));
   }
@@ -127,6 +152,19 @@ export class McpClient {
     } while (cursor !== undefined);
     return tools;
   }
+  async listItems(method, key, options = {}) {
+    const items = [], seen = new Set(); let cursor;
+    do {
+      const result = await this.request(method, cursor === undefined ? {} : { cursor }, options);
+      if (!Array.isArray(result?.[key])) throw fail("Invalid MCP catalog");
+      items.push(...result[key]);
+      cursor = result.nextCursor;
+      if (items.length > 10000 || seen.size > 1000 || (cursor !== undefined && (typeof cursor !== "string" || seen.has(cursor)))) throw fail("Invalid MCP pagination cursor or limit");
+      seen.add(cursor);
+    } while (cursor !== undefined);
+    return items;
+  }
+  async notify(method, params = {}) { return this.transport.send({ jsonrpc: "2.0", method, params }); }
   callTool(name, args = {}, options = {}) {
     if (!this.connected) return Promise.reject(fail("MCP client not connected"));
     return this.request("tools/call", { name, arguments: args }, options);
@@ -134,13 +172,15 @@ export class McpClient {
   close(error = fail("MCP client closed")) {
     if (this.closed) return;
     this.closed = true; this.connected = false;
+    for (const controller of this.incoming.values()) controller.abort();
+    this.incoming.clear();
     for (const done of [...this.operations]) done(error);
     for (const item of [...this.pending.values()]) { item.done(error); item.controller.abort(); }
     try { Promise.resolve(this.transport.close()).catch(() => {}); } catch { /* best effort */ }
   }
 }
 
-export function createHttpTransport({ url, fetch = globalThis.fetch, headers = {}, timeoutMs = 30000, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout, maxResponseChars = 8 * 1024 * 1024 } = {}) {
+export function createHttpTransport({ url, fetch = globalThis.fetch, headers = {}, timeoutMs = 120000, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout, maxResponseChars = 8 * 1024 * 1024 } = {}) {
   const endpoint = new URL(url);
   if (!["https:", "http:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw fail("Invalid MCP HTTP URL");
   let receive, onClose, session = null, version = null, closed = false;

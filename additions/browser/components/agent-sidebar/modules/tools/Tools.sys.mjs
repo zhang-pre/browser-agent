@@ -1176,6 +1176,8 @@ function toolTable() {
  * @returns {Array<{name,description,parameters,handler}>}
  */
 export function createBuiltinTools(backends = {}) {
+  const firefoxTool = name => /^(page_|net_|scripts_|env_|addons_|webapi_)/.test(name) ||
+    ["cookies", "hook_inject", "find_param_entry", "signer_trace", "closure_read", "jsvmp_trace", "jsvmp_query", "jsvmp_status", "whitebox_diff"].includes(name);
   return toolTable()
     .filter(t => {
       try {
@@ -1186,7 +1188,7 @@ export function createBuiltinTools(backends = {}) {
     })
     .map(t => ({
       name: t.name,
-      description: t.description,
+      description: (firefoxTool(t.name) ? "[内置 Firefox 工具；不操作 MCP 的 Chrome 页面或网络队列] " : "") + t.description,
       parameters: t.parameters,
       needsConfirm: CONFIRM_TOOLS.has(t.name),
       handler: (args, ctx) => t._call(backends, args, ctx),

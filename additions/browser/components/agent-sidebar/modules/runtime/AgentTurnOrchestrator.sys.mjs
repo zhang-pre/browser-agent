@@ -415,17 +415,26 @@ export class AgentTurnOrchestrator {
   }
 
   _requestConfirmation(state, call) {
-    if (this.runtimeCore.hasSteering(state) || state.aborted) return Promise.resolve(false);
+    if (this.runtimeCore.hasSteering(state) || state.aborted || call.signal?.aborted) return Promise.resolve(false);
     if (state.approveAll && !call.mcp) {
       return Promise.resolve(true);
     }
     return new Promise(resolve => {
+      const abort = () => {
+        if (state.pendingConfirm?.id === call.id) {
+          state.pendingConfirm = null;
+          this.runtimeCore.notify(state);
+        }
+        done(false);
+      };
+      const done = value => { call.signal?.removeEventListener("abort", abort); resolve(value); };
+      call.signal?.addEventListener("abort", abort, { once: true });
       state.pendingConfirm = {
         id: call.id,
         name: call.name,
         args: call.args,
         mcp: call.mcp,
-        resolve,
+        resolve: done,
       };
       this.runtimeCore.notify(state);
     });

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { McpConfigStore, previewMcpImport } from '../modules/mcp/McpConfigStore.sys.mjs';
 import { McpManager, mcpToolAlias } from '../modules/mcp/McpManager.sys.mjs';
 import { ToolRouter } from '../modules/tools/ToolRouter.sys.mjs';
+import { createBuiltinTools } from '../modules/tools/Tools.sys.mjs';
+import { runAgentTurn } from '../modules/runtime/AgentLoop.sys.mjs';
 const clone = x => structuredClone(x);
 function profile(initial = null) {
   let data = initial, nextId = 0; const secrets = new Map();
@@ -144,3 +146,130 @@ retry.store.read = async () => { if (++reads === 1) throw new Error('temporarily
 await assert.rejects(retry.store.list(), /temporarily/);
 assert.deepEqual(await retry.store.list(), []); assert.equal(reads, 2);
 console.log('MCP manager: unchanged shared snapshots, concurrent HTTP polling, delete cleanup and initialization retry passed');
+
+// Regression: a Firefox navigation must never be presented as evidence from
+// js-reverse's independent Chrome network queue. Verify the actual model/tool
+// boundary, including empty successes, without making live site/model requests.
+const bp = profile(), br = new ToolRouter();
+let firefoxCalls = 0, chromeCalls = [];
+br.registerAll(createBuiltinTools({ page: { navigate: async () => { firefoxCalls++; } } }));
+const browserTools = ['select_page', 'new_page', 'navigate_page', 'list_network_requests', 'picture', 'error']
+  .map(name => ({ name, inputSchema: schema, description: 'upstream description' }));
+const bm = new McpManager({ store: bp.store, router: br, createClient: async cfg => ({
+  closed: false,
+  async connect() { return { serverInfo: { name: cfg.name === 'renamed browser' ? 'js-reverse' : 'unrelated' } }; },
+  async listTools() { return browserTools; },
+  async callTool(name) {
+    chromeCalls.push(name);
+    if (name === 'error') return { isError: true, content: [{ type: 'text', text: 'failed upstream' }] };
+    if (name === 'picture') return { content: [{ type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }] };
+    return { content: [{ type: 'text', text: 'No requests found.' }],
+      structuredContent: { ok: true, data: { requests: [] } } };
+  },
+  close() { this.closed = true; },
+}) });
+const bc = await bm.save({ name: 'renamed browser', command: 'node', enabled: true });
+const unrelated = await bm.save({ name: 'js-reverse', command: 'unrelated', enabled: true });
+const packaged = await bm.save({ name: 'local package', command: 'node', args: ['C:\\tools\\node_modules\\js-reverse-mcp\\build\\src\\index.js'], enabled: false });
+await bm.prepare();
+const ba = name => mcpToolAlias(bc.id, name);
+const descriptions = br.listSpecs().map(s => s.function);
+assert.match(descriptions.find(s => s.name === 'page_navigate').description, /Firefox.*MCP/);
+const networkDescription = descriptions.find(s => s.name === ba('list_network_requests')).description;
+assert.match(networkDescription, /独立 Chrome\/Chromium/);
+assert(networkDescription.includes(ba('select_page')));
+assert(networkDescription.includes(ba('new_page')));
+assert(networkDescription.includes(ba('navigate_page')));
+assert.match(networkDescription, /Set-Cookie.*document.cookie/);
+assert.match(networkDescription, /allowedRoots/);
+assert(!descriptions.find(s => s.name === mcpToolAlias(unrelated.id, 'select_page')).description.includes('Chrome/Chromium'), 'display name alone does not classify a server');
+const statuses = await bm.list();
+assert.equal(statuses.find(s => s.id === packaged.id).executionContext.browser, 'Chrome/Chromium');
+assert.equal(statuses.find(s => s.id === unrelated.id).executionContext.browser, undefined);
+assert.equal(statuses.find(s => s.id === bc.id).executionContext.connection, 'local-process');
+let modelCalls = 0;
+const browserResult = await runAgentTurn({ router: br, messages: [], assist: true, maxRounds: 2, mcpAutoApprove: true,
+  client: { async chat(messages, options) {
+    if (modelCalls++ === 0) {
+      assert(options.tools.find(t => t.function.name === ba('list_network_requests')).function.description.includes('Chrome/Chromium'));
+      return { toolCalls: [{ id: 'network', type: 'function', function: { name: ba('list_network_requests'), arguments: '{}' } }] };
+    }
+    const evidence = JSON.parse(messages.findLast(m => m.role === 'tool').content);
+    assert.equal(evidence.ok, true, 'empty network result remains a successful tool call');
+    assert.equal(evidence.data.executionContext.browserContext, 'independent-of-firefox');
+    assert.equal(evidence.data.executionContext.serverId, bc.id);
+    assert.deepEqual(evidence.data.structuredContent.data.requests, []);
+    assert.match(evidence.data.browserGuidance, /空结果先检查/);
+    return { content: 'Check the Chrome target before interpreting empty evidence.' };
+  } },
+});
+assert.equal(browserResult.toolCalls[0].env.ok, true);
+assert.equal(firefoxCalls, 0);
+assert.deepEqual(chromeCalls, ['list_network_requests']);
+const chromeImage = await br.dispatch(ba('picture'), {}, { mcpApproved: ba('picture') });
+assert.equal(chromeImage.media[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
+assert.equal(chromeImage.data.executionContext.browser, 'Chrome/Chromium');
+assert.equal((await br.dispatch(ba('error'), {}, { mcpApproved: ba('error') })).ok, false);
+bm.close();
+console.log('MCP browser context: identity, renamed/package servers, Firefox separation, empty evidence through AgentLoop, images and errors passed');
+
+// Selected directories augment only the local js-reverse launch. Reconnection
+// invalidates stale snapshots/IDs, never replays a call, and leaves config alone.
+const wp = profile(), wr = new ToolRouter(), launches = [], clients = [];
+let finishBusy;
+const wm = new McpManager({ store: wp.store, router: wr,
+  resolveWorkspace: async root => { if (root === '/missing') throw Error('missing directory'); return root.replace('/link/', '/real/'); },
+  createClient: async config => {
+    launches.push(clone(config));
+    const client = { closed: false, calls: [], async connect() { return { serverInfo: { name: config.name.startsWith('wrapped') ? 'js-reverse' : 'other' } }; },
+      async listTools() { return [{name:'list_network_requests', inputSchema:schema}, {name:'evaluate_script', inputSchema:schema}, {name:'wait', inputSchema:schema}]; },
+      async callTool(name,args) { this.calls.push({name,args}); if (name === 'wait') await new Promise(resolve=>{finishBusy=resolve;}); return {content:[{type:'text',text:'ok'}]}; },
+      close() { this.closed = true; } };
+    clients.push(client);return client;
+  } });
+const wc=await wm.save({name:'browser',enabled:true,command:'node',args:['/opt/js-reverse-mcp/build/src/index.js','--allowedRoots','/configured']});
+const unrelatedLocal=await wm.save({name:'other',enabled:true,command:'node',args:['other.js']});
+const remote=await wm.save({name:'wrapped remote',enabled:true,transport:'http',url:'https://example.invalid/mcp'});
+await wm.prepare({workspaceRoot:'/link/project'});
+assert.deepEqual(launches.find(c=>c.id===wc.id).args.slice(-4),['--allowedRoots','/configured','--allowedRoots','/real/project']);
+assert.deepEqual(launches.find(c=>c.id===unrelatedLocal.id).args,['other.js']);
+assert.equal(launches.find(c=>c.id===remote.id).args,undefined);
+assert.deepEqual(wp.store.cached(wc.id).args,wc.args,'temporary roots do not mutate persisted config');
+const count=launches.length;
+await wm.prepare({workspaceRoot:'/link/project'});assert.equal(launches.length,count,'same canonical root keeps the connection');
+const wa=n=>mcpToolAlias(wc.id,n);
+await wm.setPolicy(wc.id,'list_network_requests','allow');
+const oldConnection=(await wm.list()).find(s=>s.id===wc.id).executionContext.connectionId;
+const stale=wr.snapshot();
+await wm.prepare({workspaceRoot:'/second workspace'});
+assert.equal(stale.getPermission(wa('list_network_requests')).policy,'deny');
+assert.equal(wr.getPermission(wa('list_network_requests')).policy,'allow','host-added root does not reset tool consent');
+const active=clients.at(-1), launch=launches.at(-1);
+assert.equal(launch.id,wc.id);
+assert.deepEqual(launch.args.slice(-4),['--allowedRoots','/real/project','--allowedRoots','/second workspace']);
+const exported=await wr.dispatch(wa('list_network_requests'),{reqid:30,outputFile:'work/headers.json'},{workspaceRoot:'/second workspace'});
+assert.equal(exported.ok,true);
+assert.equal(active.calls.at(-1).args.outputFile,'/second workspace/work/headers.json');
+assert.equal(active.calls.at(-1).args.reqid,30,'path adapter does not rewrite request IDs');
+assert.notEqual(exported.data.executionContext.connectionId,oldConnection);
+assert.equal(exported.data.executionContext.workspaceReconnect,true);
+await wr.dispatch(wa('evaluate_script'),{localFilePath:'input.js',outputFile:'/configured/out.json'},{workspaceRoot:'/second workspace',mcpApproved:wa('evaluate_script')});
+assert.deepEqual(active.calls.at(-1).args,{localFilePath:'/second workspace/input.js',outputFile:'/configured/out.json'});
+await assert.rejects(wm.prepare({workspaceRoot:'/missing'}),/missing/);
+await assert.rejects(wm.prepare({workspaceRoot:'relative'}),/绝对路径/);
+const abortRoot=new AbortController();abortRoot.abort();
+await wm.prepare({workspaceRoot:'/cancelled',signal:abortRoot.signal});assert(!wm.workspaceRoots.get(wc.id).has('/cancelled'));
+await wm.setPolicy(wc.id,'wait','allow');
+const busy=wr.dispatch(wa('wait'),{});
+while(!finishBusy) await new Promise(r=>setTimeout(r,0));
+await assert.rejects(wm.prepare({workspaceRoot:'/busy-new'}),/正在执行/);
+assert.equal(active.closed,false,'directory change cannot kill an in-flight tool');
+assert(!wm.workspaceRoots.get(wc.id).has('/busy-new'));
+finishBusy();await busy;
+await wm.prepare({workspaceRoot:'/busy-new'});
+const wrapped=await wm.save({name:'wrapped',enabled:true,command:'node',args:['custom-wrapper.js']});
+await wm.prepare({workspaceRoot:'/second workspace'});
+assert.deepEqual(launches.filter(c=>c.id===wrapped.id).at(-1).args,['custom-wrapper.js','--allowedRoots','/second workspace'],'handshake identifies renamed/wrapped service');
+await wm.save({...wp.store.cached(wc.id),args:['replacement.js']});assert(!wm.workspaceRoots.has(wc.id),'edited server does not inherit temporary roots');
+wm.close();
+console.log('MCP workspace: launch allowlist, canonical paths, unchanged connections/config/consent, relative files, stale snapshots, cancellation, active calls, wrappers and unrelated/HTTP services passed');

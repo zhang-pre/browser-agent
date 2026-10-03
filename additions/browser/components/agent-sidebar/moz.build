@@ -44,6 +44,7 @@ EXTRA_JS_MODULES.agentsidebar.mcp += [
     "modules/mcp/McpClient.sys.mjs",
     "modules/mcp/McpConfigStore.sys.mjs",
     "modules/mcp/McpManager.sys.mjs",
+    "modules/mcp/McpSessionRequests.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.providers += [

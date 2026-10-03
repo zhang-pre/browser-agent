@@ -22,6 +22,7 @@ export class ToolRouter {
   /** @param {object} [opts] { maxChars } */
   constructor(opts = {}) {
     this._tools = new Map();
+    this._sourceContexts = new Map();
     this.maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   }
 
@@ -61,6 +62,8 @@ export class ToolRouter {
     return this;
   }
 
+  setSourceContext(id, text) { this._sourceContexts.set(id, text); }
+  sourceContext() { return [...this._sourceContexts].filter(([id]) => [...this._tools.values()].some(t => t.sourceId === id)).map(([, text]) => text).filter(Boolean).join("\n"); }
   setPrepareHook(hook) { this._prepareHook = hook; return this; }
   async prepare(ctx = {}) { await this._prepareHook?.(ctx); }
 
@@ -74,11 +77,13 @@ export class ToolRouter {
     return this;
   }
   removeSource(sourceId) {
+    this._sourceContexts.delete(sourceId);
     this._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
   }
   snapshot() {
     const copy = new ToolRouter({ maxChars: this.maxChars });
     copy._tools = new Map(this._tools);
+    copy._sourceContexts = new Map(this._sourceContexts);
     return copy;
   }
   getPermission(name) {
@@ -146,7 +151,7 @@ export class ToolRouter {
       const data = await tool.handler(args || {}, ctx);
       return this._envelope(data);
     } catch (e) {
-      return { ok: false, error: e && e.message ? e.message : String(e) };
+      return { ok: false, error: e && e.message ? e.message : String(e), ...(e?.mcpError ? { mcpError: e.mcpError } : {}) };
     }
   }
 

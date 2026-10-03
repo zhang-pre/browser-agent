@@ -11,6 +11,17 @@ const LoginInfo = Components.Constructor("@mozilla.org/login-manager/loginInfo;1
 const ORIGIN = "chrome://browser-agent";
 const REALM = "MCP service credentials";
 let manager = null;
+export async function resolveFirefoxMcpWorkspace(root) {
+  if (typeof root !== "string" || !PathUtils.isAbsolute(root)) throw new Error("MCP 工作目录必须是本机绝对路径");
+  // IOUtils has no realPath in the supported Firefox build. nsIFile.normalize
+  // is the native path canonicalizer (realpath on Unix); the server also checks
+  // real paths when enforcing its allowedRoots policy.
+  const directory = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+  directory.initWithPath(root);
+  directory.normalize();
+  if ((await IOUtils.stat(directory.path)).type !== "directory") throw new Error("MCP 工作目录不存在或不是目录");
+  return directory.path;
+}
 async function findLogin(id) {
   await Services.logins.initializationPromise;
   return Services.logins.findLogins(ORIGIN, null, REALM).find(login => login.username === id);
@@ -38,15 +49,18 @@ export function initializeMcp(router) {
     async deleteSecret(id) { const login = await findLogin(id); if (login) await Services.logins.removeLoginAsync(login); },
     newId: () => Services.uuid.generateUUID().toString().replace(/[{}-]/g, ""),
   });
-  manager = new McpManager({ store, router, async createClient(config, credentials, hooks) {
+  manager = new McpManager({ store, router, resolveWorkspace: resolveFirefoxMcpWorkspace, async createClient(config, credentials, hooks) {
     const transport = config.transport === "stdio" ? createFirefoxStdioTransport({
       Subprocess, config, env: credentials.env, onStderr: hooks.onStderr,
       resolveCommand: (config, env) => resolveMcpCommand(config, env, {
         windows: Services.appinfo.OS === "WINNT", workspace: getBackends().workspace,
         Subprocess, PathUtils, IOUtils, getEnv: key => Services.env.get(key),
       }),
-    }) : createHttpTransport({ url: config.url, headers: credentials.headers, fetch: (...args) => globalThis.fetch(...args), setTimeout, clearTimeout });
-    return new McpClient({ transport, setTimeout, clearTimeout, onNotification: hooks.onNotification });
+    }) : createHttpTransport({ timeoutMs: config.timeoutMs || 120000, url: config.url, headers: credentials.headers, fetch: (...args) => globalThis.fetch(...args), setTimeout, clearTimeout });
+    const secretValues = [...Object.values(credentials.env || {}), ...Object.values(credentials.headers || {}).flatMap(value => [value, ...(/^(?:Bearer|Basic)\s+(.+)$/i.exec(value)?.slice(1) || [])])].filter(Boolean).sort((a, b) => b.length - a.length);
+    const redact = value => secretValues.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
+    return new McpClient({ transport, timeoutMs: config.timeoutMs || 120000, setTimeout, clearTimeout,
+      onNotification: hooks.onNotification, onRequest: hooks.onRequest, capabilities: hooks.capabilities, redact });
   } });
   Services.obs.addObserver(() => manager.close(), "quit-application-granted");
   return manager;

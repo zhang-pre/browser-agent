@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const EMPTY = { name: "", transport: "stdio", command: "", args: "[]", cwd: "", url: "", secrets: "" };
+const EMPTY = { timeoutMs: 120000, name: "", transport: "stdio", command: "", args: "[]", cwd: "", url: "", secrets: "" };
 const STATUS = { connected: "已连接", connecting: "连接中", disconnected: "未连接", disabled: "已停用", error: "连接失败", idle: "未连接" };
 
 function jsonObject(text, label) {
@@ -53,7 +53,7 @@ export default function McpSettings({ mcp }) {
 
   async function save() {
     await action(async () => {
-      const config = { name: form.name.trim(), transport: form.transport, enabled: !!form.enabled };
+      const config = { name: form.name.trim(), transport: form.transport, enabled: !!form.enabled, timeoutMs: Number(form.timeoutMs) };
       if (!config.name) throw new Error("请填写服务名称");
       if (form.id) config.id = form.id;
       else config.enabled = false;
@@ -77,7 +77,7 @@ export default function McpSettings({ mcp }) {
   return (
     <section className="settings-pane__section" aria-label="第三方 MCP 服务">
       <div className="settings-pane__section-title">第三方 MCP 服务</div>
-      <p className="settings-pane__hint">当前浏览器 profile 的全部会话共享已启用工具。请自行准备本地服务及运行环境；命令在浏览器所在系统执行。</p>
+      <p className="settings-pane__hint">当前浏览器 profile 的全部会话共享已启用工具。请自行准备本地服务及运行环境；命令在浏览器所在系统执行。第三方服务操作的浏览器可能与当前 Firefox 不同；js-reverse 使用独立 Chrome/Chromium。</p>
       <div className="settings-pane__actions">
         <button type="button" disabled={busy} onClick={() => edit(null)}>添加服务</button>
         <button type="button" disabled={busy} onClick={() => action(async () => {})}>刷新状态</button>
@@ -91,6 +91,8 @@ export default function McpSettings({ mcp }) {
         <section className="settings-pane__section" key={server.id} aria-label={server.name}>
           <strong>{server.name}</strong>
           <p className="settings-pane__hint">{server.transport === "stdio" ? "本地命令" : "远程 HTTP"} · {STATUS[server.status] || server.status || "未连接"}</p>
+          {server.executionContext?.browser && <p className="settings-pane__hint">操作目标：{server.executionContext.browser}（独立于当前 Firefox）</p>}
+          {!!server.executionContext?.workspaceRoots?.length && <p className="settings-pane__hint">本次运行已加入的工作目录：{server.executionContext.workspaceRoots.join("、")}。新增目录会重连服务，需重新采集请求。</p>}
           <label className="settings-pane__field settings-pane__field--check">
             <input type="checkbox" checked={!!server.enabled} disabled={busy} onChange={e => action(() => mcp.setEnabled(server.id, e.target.checked))} />启用服务
           </label>
@@ -125,6 +127,7 @@ export default function McpSettings({ mcp }) {
         <legend>{form.id ? "编辑服务" : "添加服务"}</legend>
         <label className="settings-pane__field">服务名称<input type="text" value={form.name} onChange={e => field("name", e.target.value)} /></label>
         <label className="settings-pane__field">连接方式<select value={form.transport} onChange={e => setForm(previous => ({ ...previous, transport: e.target.value, secrets: "" }))}><option value="stdio">本地命令（stdio）</option><option value="http">远程 HTTP</option></select></label>
+        <label className="settings-pane__field">调用超时（毫秒）<input type="number" min="1000" max="1800000" value={form.timeoutMs} onChange={e => field("timeoutMs", e.target.value)} /></label>
         {form.transport === "stdio" ? <>
           <label className="settings-pane__field">启动命令<input type="text" value={form.command} placeholder="例如 npx 或可执行文件绝对路径" onChange={e => field("command", e.target.value)} /></label>
           <label className="settings-pane__field">启动参数（JSON 数组）<textarea rows={3} value={form.args} onChange={e => field("args", e.target.value)} spellCheck={false} /></label>

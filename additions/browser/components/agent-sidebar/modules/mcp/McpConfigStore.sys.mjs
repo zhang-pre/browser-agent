@@ -22,7 +22,9 @@ export function normalizeMcpConfig(input) {
   if (!["stdio", "http"].includes(transport)) throw new Error("只支持 stdio 和 Streamable HTTP；不支持旧版 SSE 地址");
   const name = String(input.name || "").trim();
   if (!name || name.length > 160) throw new Error("请填写不超过 160 字符的服务名称");
-  const result = { name, transport, enabled: input.enabled === true };
+  const timeoutMs = input.timeoutMs ?? 120000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 1800000) throw new Error("MCP 超时必须为 1000–1800000 毫秒");
+  const result = { name, transport, enabled: input.enabled === true, timeoutMs };
   if (transport === "stdio") {
     if (typeof input.command !== "string" || !input.command.trim() || /[\0\r\n]/.test(input.command)) throw new Error("请填写有效的启动命令，参数单独填写");
     if (input.args !== undefined && (!Array.isArray(input.args) || input.args.some(x => typeof x !== "string" || x.includes("\0")))) throw new Error("args 必须是字符串数组");
@@ -48,7 +50,7 @@ export function previewMcpImport(text) {
   if (!entries.length) throw new Error("mcpServers 不能为空");
   if (entries.length > 64) throw new Error("每次最多导入 64 个服务");
   const warnings = Object.keys(input).filter(k => k !== "mcpServers").map(k => `忽略顶层字段：${k}`);
-  const known = new Set(["name", "transport", "type", "command", "args", "cwd", "url", "env", "headers", "enabled", "disabled"]);
+  const known = new Set(["name", "transport", "type", "command", "args", "cwd", "url", "env", "headers", "enabled", "disabled", "timeoutMs"]);
   const servers = entries.map(([name, value]) => {
     record(value, `服务 ${name}`);
     for (const key of Object.keys(value)) if (!known.has(key)) warnings.push(`${name}：不支持字段 ${key}`);
@@ -153,7 +155,7 @@ export class McpConfigStore {
   async exportConfig() {
     const servers = await this.list();
     return { mcpServers: Object.fromEntries(servers.map(s => [s.name, s.transport === "stdio" ?
-      { command: s.command, args: s.args, ...(s.cwd ? { cwd: s.cwd } : {}) } : { type: "http", url: s.url }])) };
+      { timeoutMs: s.timeoutMs, command: s.command, args: s.args, ...(s.cwd ? { cwd: s.cwd } : {}) } : { type: "http", url: s.url, timeoutMs: s.timeoutMs }])) };
   }
 }
 

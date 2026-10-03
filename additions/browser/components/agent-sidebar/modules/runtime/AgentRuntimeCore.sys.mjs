@@ -333,6 +333,7 @@ export class AgentRuntimeCore {
     if (!state || !state.pendingConfirm || state.pendingConfirm.id !== id) {
       return false;
     }
+    const isCallback = !!state.pendingConfirm.mcp?.callback;
     const isMcp = !!state.pendingConfirm.mcp;
     if (all && approved && !isMcp) {
       state.approveAll = true;
@@ -340,7 +341,7 @@ export class AgentRuntimeCore {
     const resolve = state.pendingConfirm.resolve;
     state.pendingConfirm = null;
     this.notify(state);
-    resolve(isMcp ? { approved: !!approved, always: !!all && !!approved } : !!approved);
+    resolve(isCallback ? (typeof approved === "object" ? approved : { approved: approved === true }) : isMcp ? { approved: !!approved, always: !!all && !!approved } : !!approved);
     return true;
   }
 

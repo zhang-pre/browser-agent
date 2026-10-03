@@ -9,8 +9,8 @@ const spec = { name, mcp: { serverId: "service", toolName: "write" }, needsConfi
   getPolicy: () => policy, approveAlways: async () => { policy = "allow"; saved++; },
   handler: async () => { invoked++; return "done"; } };
 const router = new ToolRouter();
-let prepared = 0;
-router.setPrepareHook(() => { prepared++; router.replaceSource("service", [spec]); });
+let prepared = 0, preparedWorkspace;
+router.setPrepareHook(ctx => { prepared++; preparedWorkspace = ctx.workspaceRoot; router.replaceSource("service", [spec]); });
 async function run(options = {}, beforeReply) {
   let calls = 0;
   const client = { chat: async (_messages, config) => {
@@ -21,9 +21,10 @@ async function run(options = {}, beforeReply) {
     }
     return { content: "done" };
   } };
-  return runAgentTurn({ client, router: assertAgentRouterPort(router), messages: [], assist: true, maxRounds: 2, ...options });
+  return runAgentTurn({ client, router: assertAgentRouterPort(router), messages: [], toolCtx: { workspaceRoot: '/work/selected' }, assist: true, maxRounds: 2, ...options });
 }
 let result = await run({ autoApprove: true });
+assert.equal(preparedWorkspace, '/work/selected', 'runtime forwards the selected workspace to MCP preparation');
 assert.equal(result.toolCalls[0].env.denied, true, "builtin auto-approve must not bypass MCP ask");
 assert.equal(invoked, 0);
 await run({ mcpAutoApprove: true, confirm: () => { throw Error("must not prompt"); } });

@@ -61,17 +61,33 @@ async function testProfileStorage() {
   } finally { manager.close(); }
 }
 async function main() {
+  const { resolveFirefoxMcpWorkspace } = ChromeUtils.importESModule(moduleUrl("modules/host/FirefoxMcpService.sys.mjs"));
+  const canonicalRoot = await resolveFirefoxMcpWorkspace(root);
+  check(await resolveFirefoxMcpWorkspace(root + "/additions/..") === canonicalRoot, "native MCP workspace resolves directory and parent segments without IOUtils.realPath");
+  for (const invalid of ["relative-directory", fixture, root + "/missing-mcp-workspace-" + Date.now()]) {
+    let rejected = false;
+    try { await resolveFirefoxMcpWorkspace(invalid); } catch { rejected = true; }
+    check(rejected, "native MCP workspace rejects relative, file or missing path: " + invalid);
+  }
+  const symlink = Services.env.get("MCP_TEST_WORKSPACE_SYMLINK");
+  if (symlink) check(await resolveFirefoxMcpWorkspace(symlink) === canonicalRoot, "native MCP workspace resolves directory symlink");
   await testProfileStorage();
   let child, stderr = false;
   const subprocess = { async call(options) { child = await Subprocess.call(options); return child; } };
   const stdio = createFirefoxStdioTransport({ Subprocess: subprocess, config: { cwd: root },
     resolveCommand: async () => ({ command: python, args: [fixture], env: {} }), onStderr: () => { stderr = true; } });
-  const client = new McpClient({ transport: stdio, setTimeout, clearTimeout });
+  const client = new McpClient({ transport: stdio, setTimeout, clearTimeout, capabilities: { roots: { listChanged: true } },
+    onRequest: async method => { if (method !== "roots/list") throw new Error("unexpected callback"); return { roots: [{ uri: Services.io.newFileURI((() => { const f = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile); f.initWithPath(canonicalRoot); return f; })()).spec }] }; } });
   let server;
   try {
     await client.connect();
     check((await client.listTools())[0].name === "echo", "native stdio discovery");
     check((await client.callTool("echo", { value: "原生管道" })).content[0].text === "原生管道", "native UTF-8 stdio call");
+    const rootReply = JSON.parse((await client.callTool("native_roots", {})).content[0].text);
+    check(rootReply.roots[0].uri.startsWith("file:///"), "native stdio server-to-client roots callback round trip");
+    const { validateElicitation } = ChromeUtils.importESModule("resource:///modules/agentsidebar/mcp/McpSessionRequests.sys.mjs");
+    validateElicitation({ type: "object", properties: { name: { type: "string" } }, required: ["name"] }, { name: "原生 Firefox" });
+    check(true, "packaged MCP session request module loads in Firefox");
     check(stderr, "stderr is separate from protocol stdout");
     client.close();
     await child.wait();

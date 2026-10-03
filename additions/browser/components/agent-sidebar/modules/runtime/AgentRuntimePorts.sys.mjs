@@ -130,7 +130,7 @@ export function assertAgentRouterPort(router) {
     listSpecs: bound(value, "listSpecs"),
     needsConfirm: bound(value, "needsConfirm"),
     dispatch: bound(value, "dispatch"),
-    ...Object.fromEntries(["prepare", "snapshot", "getPermission", "approveAlways"]
+    ...Object.fromEntries(["prepare", "snapshot", "getPermission", "approveAlways", "sourceContext"]
       .filter(name => typeof value[name] === "function").map(name => [name, bound(value, name)])),
   });
 }
