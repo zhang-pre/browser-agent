@@ -36,10 +36,10 @@ C++ 层负责真实返回值：`navigator.*`、`screen.*`、canvas/WebGL/Audio/I
   "browserFamily": "firefox",
   "createdAt": "2026-07-03T10:00:00.000Z",
   "updatedAt": "2026-07-03T10:00:00.000Z",
-  "profilePath": "~/.firefox-reverse/environments/env_20260703_a1b2c3/profile",
-  "fingerprintPath": "~/.firefox-reverse/environments/env_20260703_a1b2c3/fingerprint.json",
-  "proxyPath": "~/.firefox-reverse/environments/env_20260703_a1b2c3/proxy.json",
-  "traceDir": "~/.firefox-reverse/environments/env_20260703_a1b2c3/traces",
+  "profilePath": "~/.browser-agent/environments/env_20260703_a1b2c3/profile",
+  "fingerprintPath": "~/.browser-agent/environments/env_20260703_a1b2c3/fingerprint.json",
+  "proxyPath": "~/.browser-agent/environments/env_20260703_a1b2c3/proxy.json",
+  "traceDir": "~/.browser-agent/environments/env_20260703_a1b2c3/traces",
   "seed": "base64-or-hex-random-seed",
   "seedMode": "persistent",
   "source": {
@@ -59,7 +59,7 @@ C++ 层负责真实返回值：`navigator.*`、`screen.*`、canvas/WebGL/Audio/I
 建议目录结构：
 
 ```text
-~/.firefox-reverse/
+~/.browser-agent/
   environments/
     manifest.json                 # 环境索引，只存摘要和 id/path
     env_xxx/
@@ -78,7 +78,7 @@ C++ 层负责真实返回值：`navigator.*`、`screen.*`、canvas/WebGL/Audio/I
 隔离原则：
 
 - 每个环境一个独立 Firefox profile，不能复用 `cookies.sqlite`、`storage/`、`webappsstore.sqlite`、`permissions.sqlite`、`cert9.db`。
-- 每个环境一个独立 trace/control 目录，避免现在 `/tmp/firefox-reverse-webapi.*` 这类路径被多个环境混用。
+- 每个环境一个独立 trace/control 目录，避免现在 `/tmp/browser-agent-webapi.*` 这类路径被多个环境混用。
 - 每个环境一个独立 seed。canvas/audio 噪声必须同环境内稳定，不要每次调用随机。
 - 删除环境时默认只从索引移除；真正删除 profile 文件必须二次确认，且要求进程已关闭、锁已释放。
 
@@ -120,7 +120,7 @@ env_validate
 `env_open` 不是简单换配置，而是启动独立进程：
 
 ```text
-firefox-reverse -no-remote -profile <env/profile> <url>
+browser-agent -no-remote -profile <env/profile> <url>
 ```
 
 启动时传入环境变量：
@@ -332,7 +332,7 @@ additions/browser/components/agent-sidebar/content/agent-panel.css
 
 ### P1：打开/关闭指定环境
 
-- `env_open` 用 `Subprocess` 启动独立 Firefox-Reverse 进程。
+- `env_open` 用 `Subprocess` 启动独立 browser-agent 进程。
 - `env_close` 先尝试温和关闭，超时再 force。
 - 记录 PID、启动 URL、心跳、锁。
 - 禁止同一 env 被重复打开。

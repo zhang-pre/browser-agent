@@ -168,7 +168,7 @@ bool OpenFileIfNeeded() {
   const char* base = getenv("MOZ_WEBAPI_TRACE_FILE");
   char baseBuf[1024];
   if (!base || !base[0]) {
-    snprintf(baseBuf, sizeof(baseBuf), "%s/firefox-reverse-webapi.ndjson", FrxTraceDir());
+    snprintf(baseBuf, sizeof(baseBuf), "%s/browser-agent-webapi.ndjson", FrxTraceDir());
     base = baseBuf;
   }
   char full[1024];
@@ -201,7 +201,7 @@ void MaybePoll() {
     strncpy(ctlBuf, ctlEnv, sizeof(ctlBuf) - 1);
     ctlBuf[sizeof(ctlBuf) - 1] = '\0';
   } else {
-    snprintf(ctlBuf, sizeof(ctlBuf), "%s/firefox-reverse-webapi.ctl.%d", FrxTraceDir(), FrxPid());
+    snprintf(ctlBuf, sizeof(ctlBuf), "%s/browser-agent-webapi.ctl.%d", FrxTraceDir(), FrxPid());
   }
   const char* ctlPath = ctlBuf;
   FILE* cf = fopen(ctlPath, "rb");

@@ -1,10 +1,11 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* SkillBackend.sys.mjs — 通用 SkillRegistry。
  *
  * 来源（后者同名覆盖前者）：
  * 1. 浏览器内置 reverse-engineering Skill；
- * 2. ~/.firefox-reverse/skills/<name>/SKILL.md；
+ * 2. ~/.browser-agent/skills/<name>/SKILL.md；
  * 3. <工作目录>/.agents/skills/<name>/SKILL.md；
- * 4. <工作目录>/.firefox-reverse/skills/<name>/SKILL.md。
+ * 4. <工作目录>/.browser-agent/skills/<name>/SKILL.md。
  *
  * 兼容：skill_get 不传 name 时仍返回原来的内置逆向方法论，并释放模板。
  */
@@ -148,11 +149,11 @@ export class SkillRegistry {
   _roots(ctx) {
     const roots = [];
     const home = this._homeDir();
-    if (home) roots.push({ source: "user", root: PathUtils.join(home, ".firefox-reverse", "skills") });
+    if (home) roots.push({ source: "user", root: PathUtils.join(dataDirectory(home, ".browser-agent"), "skills") });
     const workspace = this._workspaceRoot(ctx);
     if (workspace) {
       roots.push({ source: "workspace", root: PathUtils.join(workspace, ".agents", "skills") });
-      roots.push({ source: "workspace", root: PathUtils.join(workspace, ".firefox-reverse", "skills") });
+      roots.push({ source: "workspace", root: PathUtils.join(dataDirectory(workspace, ".browser-agent"), "skills") });
     }
     return roots;
   }

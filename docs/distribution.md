@@ -23,18 +23,18 @@
 
 ```
 # 二进制（多端预编译包）
-firefox-reverse-<version>-linux-x64.tar.xz
-firefox-reverse-<version>-linux-x64.tar.xz.sha256
-firefox-reverse-<version>-macos-arm64.dmg
-firefox-reverse-<version>-macos-arm64.dmg.sha256
-firefox-reverse-<version>-macos-x64.dmg
-firefox-reverse-<version>-macos-x64.dmg.sha256
-firefox-reverse-<version>-windows-x64.zip
-firefox-reverse-<version>-windows-x64.zip.sha256
+browser-agent-<version>-linux-x64.tar.xz
+browser-agent-<version>-linux-x64.tar.xz.sha256
+browser-agent-<version>-macos-arm64.dmg
+browser-agent-<version>-macos-arm64.dmg.sha256
+browser-agent-<version>-macos-x64.dmg
+browser-agent-<version>-macos-x64.dmg.sha256
+browser-agent-<version>-windows-x64.zip
+browser-agent-<version>-windows-x64.zip.sha256
 
 # 源码 tarball（已应用补丁，用户可跳过 bootstrap 直接 ./mach build）
-firefox-reverse-<version>-source.tar.xz
-firefox-reverse-<version>-source.tar.xz.sha256
+browser-agent-<version>-source.tar.xz
+browser-agent-<version>-source.tar.xz.sha256
 
 # 元信息
 SOURCES.md         # 对应的 upstream firefox ref + 本仓库 commit
@@ -43,7 +43,7 @@ CHANGELOG.md       # 本版相对上版的变更
 
 ## 用户自己编译的两条路径
 
-**为什么不直接把上游 firefox 源码 vendor 进 firefox-reverse？**
+**为什么不直接把上游 firefox 源码 vendor 进 browser-agent？**
 源码 ~5 GB（不含历史）/ ~30 GB（含），超过 GitHub 仓库实用上限；上游每天数百 commit，同步成本天文数字；业界（camoufox / Brave / Tor Browser / LibreWolf / Mullvad）都用补丁集模式。
 
 下面两条路径满足"用户想自己编"的需求：
@@ -53,24 +53,24 @@ CHANGELOG.md       # 本版相对上版的变更
 适合想跟踪本仓库更新的开发者。
 
 ```bash
-git clone <firefox-reverse>
-cd firefox-reverse
+git clone <browser-agent>
+cd browser-agent
 ./scripts/bootstrap.sh        # 拉上游 mozilla-firefox/firefox
 ./scripts/apply-patches.sh    # 应用我们的补丁
 ./scripts/build.sh            # ./mach build 包装
 ./scripts/package.sh
 ```
 
-依赖按 Mozilla 官方文档装：`./mach bootstrap` 会自动处理大部分。**完全不需要 firefox-reverse-build 仓库**。
+依赖按 Mozilla 官方文档装：`./mach bootstrap` 会自动处理大部分。**完全不需要 browser-agent-build 仓库**。
 
 ### 路径 B：下载 patched-source tarball
 
 适合一次性编一个固定版本的用户。
 
 ```bash
-# 从 Releases 下载 firefox-reverse-<version>-source.tar.xz
-tar -xf firefox-reverse-<version>-source.tar.xz
-cd firefox-reverse-<version>
+# 从 Releases 下载 browser-agent-<version>-source.tar.xz
+tar -xf browser-agent-<version>-source.tar.xz
+cd browser-agent-<version>
 ./mach bootstrap --no-interactive --application-choice browser
 ./mach build
 ./mach package
@@ -86,7 +86,7 @@ cd firefox-reverse-<version>
 
 ## CI 发布流程（规划）
 
-1. `firefox-reverse-build/` 的 CI 在 firefox-reverse 打 tag 时触发。
+1. `browser-agent-build/` 的 CI 在 browser-agent 打 tag 时触发。
 2. 矩阵编译四个平台，产物上传到 GitHub Releases drafts。
 3. 本人手工审核 + 发布。
 
@@ -94,8 +94,8 @@ cd firefox-reverse-<version>
 
 私有阶段没有 public release。本人/协作者获取产物：
 
-- 自己跑 `firefox-reverse-build/scripts/build-{linux,macos,windows}.sh`
-- 产物在 `firefox-reverse-build/dist/<platform>/`
+- 自己跑 `browser-agent-build/scripts/build-{linux,macos,windows}.sh`
+- 产物在 `browser-agent-build/dist/<platform>/`
 
 ## 公开门槛清单
 

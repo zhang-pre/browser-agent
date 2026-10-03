@@ -26,7 +26,7 @@ additions/.../agent-sidebar/  ← 提供 React/ESM 源文件（不改 upstream�
 
 2. **`SidebarUI` 很可能已过时** — 方案文档 3.2(a) 写的 `SidebarUI` 框架是旧架构。Firefox 近两年把 sidebar 重构为 `SidebarController` + web component（`browser/components/sidebar/`）。**0001 补丁的真实点位需 bootstrap upstream 后实地确认**，不可照文档假设直接写。
 
-3. **jsvmp trace 落盘真实路径** — A4 的 TraceBridge 对接时注意：引擎层（`additions/js/src/vm/JsvmpTraceCore.cpp`）真实默认写到 **`/tmp/firefox-reverse-jsvmp-b.ndjson.<pid>`**（可被环境变量 `MOZ_JSVMP_TRACE_FILE` 覆盖），**不是**方案文档/`settings` 写的 `~/.firefox-reverse/traces/jsvmp/`。NDJSON 行格式：
+3. **jsvmp trace 落盘真实路径** — A4 的 TraceBridge 对接时注意：引擎层（`additions/js/src/vm/JsvmpTraceCore.cpp`）真实默认写到 **`/tmp/browser-agent-jsvmp-b.ndjson.<pid>`**（可被环境变量 `MOZ_JSVMP_TRACE_FILE` 覆盖），**不是**方案文档/`settings` 写的 `~/.browser-agent/traces/jsvmp/`。NDJSON 行格式：
    ```
    {"_meta":{"version":"phase-b.0","pid":N,"filter":"...","limit":N}}
    {"_script":{"sid":"0x...","file":"..."}}

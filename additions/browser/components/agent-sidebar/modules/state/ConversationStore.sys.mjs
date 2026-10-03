@@ -1,12 +1,13 @@
+import { dataDirectory, LEGACY_PRODUCT } from "./BrandCompatibility.sys.mjs";
 /* ConversationStore.sys.mjs — Agent 多线程对话历史持久化。
  *
- * - Firefox：落盘到 profile 下 <profile>/firefox-reverse-agent/conversations.json
+ * - Firefox：落盘到 profile 下 <profile>/browser-agent-agent/conversations.json
  *   （用 IOUtils/PathUtils，system ESM 全局可用）。比 prefs 更适合大体量历史。
  * - Node 自测：无 IOUtils → 退化为内存，仍可 import 验证。
  * 全部 API 异步。数据结构：{ schemaVersion, threads: [{ id, title, createdAt, updatedAt,
  * workspace, envId, modelStrategy, unifiedContext, usage, messages:[{role,content}] }] }
  *   workspace = 该会话绑定的本地工作目录绝对路径（null=未设；**新会话默认为空/不绑定**，需用户手动打开目录）。
- *   envId = 该会话准备使用的 Firefox-Reverse 环境 id（null=未选）。
+ *   envId = 该会话准备使用的 browser-agent 环境 id（null=未选）。
  *   modelStrategy = "balanced" | "premium"，先作为 Agent 调度上下文，后续可映射到具体 provider/model。
  */
 
@@ -17,11 +18,11 @@ import {
   normalizeUnifiedContext, projectUnifiedMessages,
 } from "./UnifiedContext.sys.mjs";
 
-const DIR_NAME = "firefox-reverse-agent";
+const DIR_NAME = "browser-agent-agent";
 const FILE_NAME = "conversations.json";
 const NEW_TITLE = "新对话";
 const STORE_SCHEMA_VERSION = 4;
-const EXPORT_FORMAT = "firefox-reverse-conversation";
+const EXPORT_FORMAT = "browser-agent-conversation";
 const EXPORT_SCHEMA_VERSION = 1;
 const MAX_IMPORT_CHARS = 10 * 1024 * 1024;
 const MAX_IMPORT_MESSAGES = 5000;
@@ -119,7 +120,7 @@ export class ConversationStore {
     if (this._path) {
       return this._path;
     }
-    const dir = PathUtils.join(PathUtils.profileDir, DIR_NAME);
+    const dir = dataDirectory(PathUtils.profileDir, DIR_NAME);
     await IOUtils.makeDirectory(dir, { ignoreExisting: true });
     this._path = PathUtils.join(dir, FILE_NAME);
     return this._path;
@@ -503,7 +504,7 @@ export class ConversationStore {
         throw new Error("导入失败：不是有效 JSON");
       }
     }
-    if (!data || data.format !== EXPORT_FORMAT || data.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+    if (!data || ![EXPORT_FORMAT, LEGACY_PRODUCT + "-conversation"].includes(data.format) || data.schemaVersion !== EXPORT_SCHEMA_VERSION) {
       throw new Error("导入失败：不是受支持的 Firefox Reverse 会话文件");
     }
     const src = data.conversation;

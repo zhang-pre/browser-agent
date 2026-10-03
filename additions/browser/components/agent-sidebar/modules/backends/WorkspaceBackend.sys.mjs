@@ -721,7 +721,7 @@ export class WorkspaceBackend {
     const SP = lazyESM("resource://gre/modules/Subprocess.sys.mjs");
     const Subprocess = SP && SP.Subprocess;
     if (!Subprocess) {
-      throw new Error("Subprocess 不可用（须在 firefox-reverse 浏览器内运行）");
+      throw new Error("Subprocess 不可用（须在 browser-agent 浏览器内运行）");
     }
     const proc = await Subprocess.call({
       command,

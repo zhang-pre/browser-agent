@@ -772,7 +772,7 @@ function toolTable() {
     // ───────── ⑧ Skills（内置逆向方法论 + 用户/工作区通用 Skill） ─────────
     T(
       "skill_list",
-      "列出当前可用 Skills。来源包括浏览器内置、~/.firefox-reverse/skills，以及工作目录下 .agents/skills 和 .firefox-reverse/skills。" +
+      "列出当前可用 Skills。来源包括浏览器内置、~/.browser-agent/skills，以及工作目录下 .agents/skills 和 .browser-agent/skills。" +
         "只返回名称/描述；用户指定某 Skill 时先查列表，再用 skill_get 按名读取正文。",
       { type: "object", properties: {} },
       b => b.skill && b.skill.list,
@@ -962,7 +962,7 @@ function toolTable() {
     ),
     T(
       "env_list",
-      "列出 firefox-reverse 环境。环境是独立 profile + 独立 Firefox 进程；root 默认 ~/.firefox-reverse/environments。",
+      "列出 browser-agent 环境。环境是独立 profile + 独立 Firefox 进程；root 默认 ~/.browser-agent/environments。",
       {
         type: "object",
         properties: {

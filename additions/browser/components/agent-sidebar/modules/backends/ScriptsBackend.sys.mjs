@@ -1,7 +1,8 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* ScriptsBackend.sys.mjs — 存JS：抓页面脚本源码落盘到语料目录（= 搜索的语料）。
  *
  * list(): 用 PageBackend 在页面里枚举脚本 URL（document.scripts + resource timing）。
- * save(): parent 特权 fetch（绕过 CORS）拿源码 → IOUtils 写到 <profile>/firefox-reverse-agent/js/。
+ * save(): parent 特权 fetch（绕过 CORS）拿源码 → IOUtils 写到 <profile>/browser-agent-agent/js/。
  */
 
 // parent/system-ESM 无 window，AbortSignal.timeout 不可用；从 Timer.sys.mjs 取 setTimeout。
@@ -44,7 +45,7 @@ export class ScriptsBackend {
   }
 
   async corpusDir() {
-    const dir = PathUtils.join(PathUtils.profileDir, "firefox-reverse-agent", "js");
+    const dir = PathUtils.join(dataDirectory(PathUtils.profileDir, "browser-agent-agent"), "js");
     await IOUtils.makeDirectory(dir, { ignoreExisting: true });
     return dir;
   }

@@ -1,3 +1,4 @@
+import { LEGACY_PRODUCT } from "../state/BrandCompatibility.sys.mjs";
 /* ConfigStore.sys.mjs — Agent 侧边栏配置持久化（active provider / API Key / 模型）。
  *
  * 设计：
@@ -12,7 +13,7 @@
 import { normalizeReasoningEffort } from "../llm/ReasoningEffort.sys.mjs";
 import { normalizeFontScale } from "./SidebarTypography.sys.mjs";
 
-const PREF_PREFIX = "extensions.firefox-reverse.agent.";
+const PREF_PREFIX = "extensions.browser-agent.agent.";
 const MODEL_PROFILES_KEY = PREF_PREFIX + "modelProfiles.v1";
 const ACTIVE_MODEL_PROFILE_KEY = PREF_PREFIX + "activeModelProfileId";
 const MAX_MODEL_PROFILES = 50;
@@ -93,7 +94,13 @@ function makeBackend() {
 
 export class ConfigStore {
   constructor(backend = makeBackend()) {
-    this.b = backend;
+    const legacyKey = key => key.replace(PREF_PREFIX, "extensions." + LEGACY_PRODUCT + ".agent.");
+    this.b = {
+      persistent: backend.persistent,
+      getString: (key, def = "") => backend.getString(key, backend.getString(legacyKey(key), def)),
+      setString: (key, value) => backend.setString(key, value),
+      clear: key => { backend.clear(key); backend.clear(legacyKey(key)); },
+    };
   }
 
   /** 真持久化（Firefox prefs）还是内存（Node 自测）。 */

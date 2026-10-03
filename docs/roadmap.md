@@ -28,7 +28,7 @@
 - [ ] 写 NDJSON ring buffer writer
 - [ ] 远程 rebuild macOS arm64 → scp .dmg 回本地
 - [ ] 跑 https://目标站点/video/7141213450390359310，验证能拿到 目标SDK.js 的 SM bytecode 流
-- **里程碑**：拿到一份 `~/.firefox-reverse/traces/jsvmp/目标站点-<ts>.ndjson` 看里面是不是 JSVMP dispatcher 的字节码流
+- **里程碑**：拿到一份 `~/.browser-agent/traces/jsvmp/目标站点-<ts>.ndjson` 看里面是不是 JSVMP dispatcher 的字节码流
 
 时间预算：**3-5 天**
 
@@ -80,7 +80,7 @@
 - [ ] Windows x64
 - [ ] 产物上传到本仓库 GitHub Releases（私有，详见 [distribution.md](distribution.md)）
 
-## Phase 6 — 独立 MCP 仓库 `firefox-reverse-mcp/`
+## Phase 6 — 独立 MCP 仓库 `browser-agent-mcp/`
 
 **与 `camoufox-reverse-mcp` 解耦**，新建独立 MCP Server，提供：
 

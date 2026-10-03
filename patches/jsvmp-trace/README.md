@@ -119,10 +119,10 @@ NDJSON file (mmap, settings.trace.jsvmp_dir/jsvmp-<pid>-<ts>.ndjson)
 ## 配置（用户侧）
 
 ```toml
-# ~/.firefox-reverse/jsvmp-hooks.toml
+# ~/.browser-agent/jsvmp-hooks.toml
 
 [trace]
-output_dir = "~/.firefox-reverse/traces/jsvmp"
+output_dir = "~/.browser-agent/traces/jsvmp"
 ring_buffer_size = "64MiB"
 script_filter = '目标SDK.*\.js$'   # 默认只 trace 匹配此正则的 script URL
 
@@ -151,7 +151,7 @@ actions = ["dump_return"]
 
 环境变量切换（不重编）：
 ```bash
-export MOZ_JSVMP_HOOK_CONFIG=$HOME/.firefox-reverse/jsvmp-hooks.toml
+export MOZ_JSVMP_HOOK_CONFIG=$HOME/.browser-agent/jsvmp-hooks.toml
 export MOZ_JSVMP_TRACE=1
 open /Applications/Nightly.app --args https://目标站点/video/xxx
 ```

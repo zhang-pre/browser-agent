@@ -46,7 +46,7 @@ index 41cfaf2784..f04031810c 100644
  // When enabled, Firefox ignores the distribution.ini file if global.id is MozillaOnline.
  pref("distribution.mozillaonline.ignore", true);
 +
-+// firefox-reverse: disable content sandbox so JSVMP trace can write from content process (reverse-only)
++// browser-agent: disable content sandbox so JSVMP trace can write from content process (reverse-only)
 +pref("security.sandbox.content.level", 0);
 diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
 index 12fd083a8a..1595137631 100644
@@ -164,7 +164,7 @@ index 6bd76b8607..cf6de23ca3 100644
  sidebar-menu-genai-chat-label =
    .label = AI chatbot
 +sidebar-menu-agent-label =
-+  .label = Firefox-Reverse-Agent
++  .label = browser-agent-Agent
  sidebar-menu-history-label =
    .label = History
  sidebar-menu-synced-tabs-label =

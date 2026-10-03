@@ -61,9 +61,11 @@ SELFTESTS=(
 )
 
 for test_file in "${SELFTESTS[@]}"; do
-  run node "$SIDEBAR_DIR/dev/$test_file"
+  # Preserve excluded dev fixtures while checking the renamed product contract.
+  run node --import "$REPO_ROOT/scripts/tests/register-product-name.mjs" "$SIDEBAR_DIR/dev/$test_file"
 done
 
+run node "$REPO_ROOT/scripts/tests/product-rename.mjs"
 run node "$REPO_ROOT/scripts/check-branding-assets.mjs"
 
 echo

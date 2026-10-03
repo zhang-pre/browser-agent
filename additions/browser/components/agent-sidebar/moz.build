@@ -67,6 +67,7 @@ EXTRA_JS_MODULES.agentsidebar.runtime += [
 ]
 
 EXTRA_JS_MODULES.agentsidebar.state += [
+    "modules/state/BrandCompatibility.sys.mjs",
     "modules/state/CompletionMemory.sys.mjs",
     "modules/state/ConversationMigration.sys.mjs",
     "modules/state/ConversationStore.sys.mjs",

@@ -20,10 +20,10 @@ cd "$upstream"
 if [[ ${FRX_L10N_UPDATE:-0} != 1 ]]; then
   export MOZ_AUTOMATION=1
 fi
-export MOZ_SOURCE_REPO=${MOZ_SOURCE_REPO:-https://github.com/WhiteNightShadow/firefox-reverse}
+export MOZ_SOURCE_REPO=${MOZ_SOURCE_REPO:-https://github.com/WhiteNightShadow/browser-agent}
 export MOZ_SOURCE_CHANGESET=${MOZ_SOURCE_CHANGESET:-$(git -C "$repo_root" rev-parse HEAD)}
 export MOZ_BUILD_DATE=${MOZ_BUILD_DATE:-$(date -u +%Y%m%d%H%M%S)}
-export MH_BRANCH=${MH_BRANCH:-firefox-reverse}
+export MH_BRANCH=${MH_BRANCH:-browser-agent}
 # The custom branding intentionally reuses one logo bitmap in several Firefox
 # branding slots. Multi-locale packaging enables automation's byte-for-byte
 # duplicate scan, which rejects those known brand aliases. Keep all normal

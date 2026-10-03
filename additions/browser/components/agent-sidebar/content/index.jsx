@@ -12,7 +12,7 @@ import { applySidebarFontScale } from "../modules/providers/SidebarTypography.sy
  * 见 patches/agent-ui/README.md。 */
 function loadModules() {
   if (typeof ChromeUtils === "undefined") {
-    throw new Error("ChromeUtils 不可用：agent-sidebar 须在 firefox-reverse 浏览器内运行");
+    throw new Error("ChromeUtils 不可用：agent-sidebar 须在 browser-agent 浏览器内运行");
   }
   const { configStore } = ChromeUtils.importESModule(
     "resource:///modules/agentsidebar/providers/ConfigStore.sys.mjs"

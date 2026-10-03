@@ -21,6 +21,11 @@ def patch_file(path, transformations):
     content = open(path).read()
     changed = False
     for desc, old, new in transformations:
+        # Upgrade already-patched trees without inserting the same hook twice.
+        legacy_new = new.replace("browser-agent", "-".join(("firefox", "reverse")))
+        if legacy_new != new and legacy_new in content:
+            content = content.replace(legacy_new, new, 1)
+            changed = True
         if new in content:
             print(f"  [skip] {desc} (already applied)")
             continue
@@ -127,7 +132,7 @@ patch_file(buhpath, [
         "add include for WebApiTraceCore.h in BindingUtils.h",
         '#include "js/experimental/JitInfo.h"  // JSJitGetterOp, JSJitInfo\n',
         '#include "js/experimental/JitInfo.h"  // JSJitGetterOp, JSJitInfo\n'
-        '#include "mozilla/dom/WebApiTraceCore.h"  // firefox-reverse: 通用 Web-API 调用追踪\n',
+        '#include "mozilla/dom/WebApiTraceCore.h"  // browser-agent: 通用 Web-API 调用追踪\n',
     ),
 ])
 
@@ -151,7 +156,7 @@ CG_NEW = (
     "        profiler_label = self.auto_profiler_label()\n"
     "        if profiler_label:\n"
     '            prologue += indent(profiler_label) + "\\n"\n'
-    "            # firefox-reverse: 注入通用 Web-API 调用追踪(RAII，引擎层、JS 不可检测)。\n"
+    "            # browser-agent: 注入通用 Web-API 调用追踪(RAII，引擎层、JS 不可检测)。\n"
     "            _frx_member = getattr(self, \"method\", None) or getattr(self, \"attr\", None)\n"
     "            _frx_desc = getattr(self, \"descriptor\", None)\n"
     "            _frx_isstatic = getattr(_frx_member, \"isStatic\", None)\n"
@@ -198,7 +203,7 @@ patch_file(nbapath, [
         "int main(int argc, char* argv[], char* envp[]) {\n",
         "int main(int argc, char* argv[], char* envp[]) {\n"
         "#if defined(XP_WIN)\n"
-        "  // firefox-reverse: content sandbox on Windows blocks engine-layer trace from writing\n"
+        "  // browser-agent: content sandbox on Windows blocks engine-layer trace from writing\n"
         "  // NDJSON to %TEMP% (fopen fails). content sandbox level is already 0 but release builds\n"
         "  // clamp the pref. Inject MOZ_DISABLE_CONTENT_SANDBOX=1 at earliest parent startup\n"
         "  // (content procs inherit it) so jsvmp/webapi trace can persist to disk.\n"

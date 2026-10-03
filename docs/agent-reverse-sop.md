@@ -1,6 +1,6 @@
 # Agent 能力与逆向 SOP
 
-> firefox-reverse 浏览器内置 Agent 的**能力清单**与**通用逆向方法论**。
+> browser-agent 浏览器内置 Agent 的**能力清单**与**通用逆向方法论**。
 > 方法论思路参考 `hello_js_reverse_skill`，但这里是站点无关的通用流程——**不绑定任何具体站点/参数**。
 > 系统提示里内置了精简版；本文是完整参考。
 
@@ -52,7 +52,7 @@
 - ⚠️ **混淆很常见**：参数名常由字符串数组拼出，**明文搜不到属正常**，别死搜 → 转第 4 步。
 
 ### 4. 算法还原（核心路径，引擎级无侵入）
-firefox-reverse 把「hook/插桩/日志/源码插桩」统一成 C++ 引擎层能力——**只走算法还原**，不依赖让浏览器替你生成（不做黑盒复现）：
+browser-agent 把「hook/插桩/日志/源码插桩」统一成 C++ 引擎层能力——**只走算法还原**，不依赖让浏览器替你生成（不做黑盒复现）：
 - `jsvmp_trace start`（**不设 filter 或填准确脚本名；要在目标代码冷跑前开**）→ 触发一次参数生成 → `jsvmp_query` 读 VM 执行轨迹（opcode/pc/行列），据此还原 dispatcher、decode、算法骨架。
 - 配合离线 `tools/dispatcher_split.js` / `disassemble.js`（开发期 Subprocess）把 trace 翻成伪代码。
 - 对非 JSVMP 的普通混淆：`code_search` 定位函数 + `page_eval` 读闭包常量/中间值，逐段还原算法逻辑。
@@ -65,7 +65,7 @@ firefox-reverse 把「hook/插桩/日志/源码插桩」统一成 C++ 引擎层�
 - 参数在哪里生成、算法/依赖是什么、如何独立复现，给可操作要点。
 
 ## D. 工具 ↔ 通用四板斧映射
-| 通用四板斧 | firefox-reverse 原生 |
+| 通用四板斧 | browser-agent 原生 |
 |---|---|
 | Hook 函数 | `page_eval`（在页面里包/读函数） |
 | 插桩 / 日志 | C++ `jsvmp_trace`（引擎级 per-op，JS 不可见） |

@@ -1,3 +1,4 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* Profile-scoped Firefox MCP composition root. No credentials enter normal prefs. */
 import { McpConfigStore } from "../mcp/McpConfigStore.sys.mjs";
 import { McpManager } from "../mcp/McpManager.sys.mjs";
@@ -28,7 +29,7 @@ async function findLogin(id) {
 }
 export function initializeMcp(router) {
   if (manager) return manager;
-  const path = PathUtils.join(PathUtils.profileDir, "firefox-reverse-agent", "mcp.json");
+  const path = PathUtils.join(dataDirectory(PathUtils.profileDir, "browser-agent-agent"), "mcp.json");
   const store = new McpConfigStore({
     async read() { return await IOUtils.exists(path) ? IOUtils.readJSON(path) : null; },
     async write(data) {

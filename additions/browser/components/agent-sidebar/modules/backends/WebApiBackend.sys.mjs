@@ -19,7 +19,7 @@ function traceDir() {
   }
   return "/tmp";
 }
-const PREFIX = "firefox-reverse-webapi";
+const PREFIX = "browser-agent-webapi";
 
 function agentWin(ctx) {
   try { const w = ctx && ctx.win; if (w && w.gBrowser && !w.closed) return w; } catch {}
@@ -39,7 +39,7 @@ export class WebApiBackend {
    */
   _ctlPath(ctx) {
     const pid = currentContentPid(ctx);
-    const ctlBase = PathUtils.join(traceDir(), "firefox-reverse-webapi.ctl");
+    const ctlBase = PathUtils.join(traceDir(), "browser-agent-webapi.ctl");
     return pid ? ctlBase + "." + pid : ctlBase;
   }
 
@@ -305,7 +305,7 @@ export class WebApiBackend {
       const savedFile = await this._saveNdjson(
         "fingerprint-env.ndjson",
         {
-          source: "firefox-reverse webapi-trace",
+          source: "browser-agent webapi-trace",
           mode: "env",
           generated: new Date().toISOString(),
           traceFile: f,
@@ -365,7 +365,7 @@ export class WebApiBackend {
       const savedFile = await this._saveNdjson(
         "fingerprint-flow.ndjson",
         {
-          source: "firefox-reverse webapi-trace",
+          source: "browser-agent webapi-trace",
           mode: "flow",
           generated: new Date().toISOString(),
           traceFile: f,

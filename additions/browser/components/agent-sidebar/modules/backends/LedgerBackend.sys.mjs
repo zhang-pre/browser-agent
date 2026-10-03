@@ -1,8 +1,9 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 import { MEMORY_KINDS, normalizeMemory, qualifyHandoff } from "../state/MemoryContract.sys.mjs";
 // Typed workspace memory in SQLite; ledger.md is a readable mirror.
 // Discovery writes use remember; compaction writes use structured, versioned batches.
 // Legacy mem rows are migrated as unverified records, retaining original evidence.
-const DIR = "firefox-reverse-agent";
+const DIR = "browser-agent-agent";
 const DB = "memory.sqlite";
 const MD = "ledger.md";
 
@@ -75,7 +76,7 @@ export class LedgerBackend {
       this._shutdownBlocker = blocker;
       let conn = null;
       try {
-        const dir = PathUtils.join(PathUtils.profileDir, DIR);
+        const dir = dataDirectory(PathUtils.profileDir, DIR);
         await IOUtils.makeDirectory(dir, { ignoreExisting: true, createAncestors: true });
         const path = PathUtils.join(dir, DB);
         conn = await Sqlite.openConnection({ path });

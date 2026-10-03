@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 打包构建产物。多端打包请用 ../firefox-reverse-build/。
+# 打包构建产物。多端打包请用 ../browser-agent-build/。
 
 set -euo pipefail
 

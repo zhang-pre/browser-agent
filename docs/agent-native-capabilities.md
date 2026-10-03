@@ -1,19 +1,19 @@
-# firefox-reverse Agent 原生能力设计（ToolRouter + 六大基础能力）
+# browser-agent Agent 原生能力设计（ToolRouter + 六大基础能力）
 
 > 配套：[agent-sidebar.md](./agent-sidebar.md)（Agent UI / Track A 设计）、[../patches/agent-ui/HANDOFF.md](../patches/agent-ui/HANDOFF.md)（A1 交接清单）、[jsvmp-reverse-workflow.md](./jsvmp-reverse-workflow.md)（离线分析流水线）。
-> 本文聚焦：让**浏览器自身**具备 6 项 JS 逆向基础能力，并通过统一的 **ToolRouter** 暴露给内置 sidebar Agent（以及未来的 `firefox-reverse-mcp`）。
+> 本文聚焦：让**浏览器自身**具备 6 项 JS 逆向基础能力，并通过统一的 **ToolRouter** 暴露给内置 sidebar Agent（以及未来的 `browser-agent-mcp`）。
 > **本文 = Track A3/A4 的落地细化**（HANDOFF.md §5：A3 = ToolRouter + 页面 tools + 用户确认机制；A4 = jsvmp.* tools）。A1（聊天侧栏）已交接、剩 T6 编译。
 
 ## 0. 目标 / 定位 / 红线
 
-- **目标**：firefox-reverse 内置 Agent 能「直接控制浏览器做逆向」，需要浏览器原生提供：①网络捕获控制 ②保存 JS 文件 ③定位加密参数入口 ④JSVMP trace ⑤JS 执行 ⑥代码搜索。
-- **定位差异**：camoufox-reverse-mcp 是**外部** MCP（Python + Playwright/CDP 从外面驱动 Camoufox）；firefox-reverse 的 Agent **跑在浏览器内**，可直接 import Firefox 在树的引擎/DevTools 模块 →「原生」。
+- **目标**：browser-agent 内置 Agent 能「直接控制浏览器做逆向」，需要浏览器原生提供：①网络捕获控制 ②保存 JS 文件 ③定位加密参数入口 ④JSVMP trace ⑤JS 执行 ⑥代码搜索。
+- **定位差异**：camoufox-reverse-mcp 是**外部** MCP（Python + Playwright/CDP 从外面驱动 Camoufox）；browser-agent 的 Agent **跑在浏览器内**，可直接 import Firefox 在树的引擎/DevTools 模块 →「原生」。
 - **红线（继承 jsvmp 线）**：能力对**任意站点**通用，绝不把任何具体站点案例写死进源码。所有目标 script、列、参数名都来自运行时配置，不硬编码。
-- **既有决策（不再讨论，见 [[firefox-reverse-agent-sidebar]] memory）**：路径 B 内置 sidebar；不追上游（锁 153.0a1 baseline）；Key 用户自填、前端直连；不嵌本地模型；ToolRouter 是 Agent 与 MCP 的**共享抽象**。
+- **既有决策（不再讨论，见 [[browser-agent-agent-sidebar]] memory）**：路径 B 内置 sidebar；不追上游（锁 153.0a1 baseline）；Key 用户自填、前端直连；不嵌本地模型；ToolRouter 是 Agent 与 MCP 的**共享抽象**。
 
 ## 1. 现状盘点（2026-05-25 实测）
 
-| 能力 | firefox-reverse 现状 | 证据 |
+| 能力 | browser-agent 现状 | 证据 |
 |---|---|---|
 | ④ JSVMP trace | ✅ **原生 C++ 可用** | `additions/js/src/vm/JsvmpTraceCore.cpp/.h`（631 行，NDJSON，env 驱动）；`dist/*.phase-b*.dmg` 已编译实测 |
 | ① 网络捕获控制 | ❌ doc-only | `patches/network-analysis/README.md` 只列目标文件，无 patch/代码 |
@@ -62,7 +62,7 @@ ToolRouter 工具命名用 `域_动作`（与 agent-sidebar.md §3.2(d)/§8 对�
 | ③ 定位加密入口 | `find_param_entry(param,{url})` | **组合工具**：`net_get` 取 initiator 栈 + `code_search` 找参数字面量 + `page_eval`/`hook_function` 在嫌疑函数下钩子 +（可选）属性 trace → 排序候选入口（file:line + 栈） | 叠加 `patches/property-trace` 原生 getter 追踪 |
 | ⑦ 工作目录/本地执行 | `fs_list`、`fs_read`、`fs_write`、`fs_mkdir`、`run_node`、`run_python` | 每会话绑定一个本地目录（侧边栏 `nsIFilePicker` 选）；文件读写**限定目录内**（拒 `..`/绝对越界）；`Subprocess` 在目录内跑宿主 node/python（cwd=目录，回传 stdout/stderr，PATH 兜底 homebrew/usr-local）；jsvmp trace 自动镜像到 `<目录>/jsvmp/`。让 Agent 把抓取脚本/还原实现落盘并实跑验证，形成闭环 | — |
 
-**说明**：③ 是建立在 ①②⑤⑥ 之上的**编排型**工具——这也是 firefox-reverse 相对 Cursor 的差异化：Agent 能把「网络参数 ↔ 产出它的 JS ↔ JSVMP 内部」一条链打通。
+**说明**：③ 是建立在 ①②⑤⑥ 之上的**编排型**工具——这也是 browser-agent 相对 Cursor 的差异化：Agent 能把「网络参数 ↔ 产出它的 JS ↔ JSVMP 内部」一条链打通。
 
 ## 4. ToolRouter / AgentLoop 设计
 
@@ -97,7 +97,7 @@ runAgentTurn({ client, router, messages, systemPrompt?, maxRounds=6, signal, onE
 - **PageBackend**：优先 WebDriver BiDi（`resource:///modules/...` 在树模块，`script.evaluate`/`browsingContext`），回退 JSActor（chrome↔content）。返回值序列化 + 抛错带栈。
 - **NetworkBackend**：DevTools `NetworkObserver`（`resource://devtools/server/...`）进程内订阅；或 BiDi `network`（支持 `addIntercept`/`continueRequest` 改包）。统一落到内存环形缓冲 + initiator 栈。
 - **ScriptsBackend**：DevTools `Debugger` API（`scriptParsed` 拿全部已解析源，含 eval/Function/worker，比 `querySelectorAll('script')` 全），源码 `IOUtils.writeUTF8` 落盘到语料目录（= `code_search` 的语料）。
-- **JsvmpBackend**：启动期 env（`MOZ_JSVMP_TRACE*`）+ 运行期控制文件；`IOUtils` 读 `/tmp/firefox-reverse-jsvmp-b.ndjson.<pid>`；分析步 `Subprocess` 调 `tools/*.js`。缓存键 **`(file,col)`**（`sid` 是 SpiderMonkey 指针，进程重启即变）。
+- **JsvmpBackend**：启动期 env（`MOZ_JSVMP_TRACE*`）+ 运行期控制文件；`IOUtils` 读 `/tmp/browser-agent-jsvmp-b.ndjson.<pid>`；分析步 `Subprocess` 调 `tools/*.js`。缓存键 **`(file,col)`**（`sid` 是 SpiderMonkey 指针，进程重启即变）。
 - **SubprocessBackend**：`resource://gre/modules/Subprocess.sys.mjs`（chrome JS 无 `child_process`）。
 
 ## 6. 关键约束与风险
@@ -121,4 +121,4 @@ runAgentTurn({ client, router, messages, systemPrompt?, maxRounds=6, signal, onE
 - **新增全部位于** `additions/browser/components/agent-sidebar/`：`modules/{ToolRouter,AgentLoop}.sys.mjs`、`modules/tools/*.sys.mjs`（或 `modules/Tools.sys.mjs`）、`modules/backends/*.sys.mjs`（N1+）、`dev/selftest-toolrouter.mjs`。本设计文档 `docs/agent-native-capabilities.md`。
 - **只读调用、绝不修改**：`additions/js/`（jsvmp C++）、`tools/*.js`、`patches/jsvmp-trace/`、`scripts/*.py`。
 - **与 [agent-sidebar.md](./agent-sidebar.md) 关系**：本文是其 §3.2(d)/§6（ToolRouter）/§8（jsvmp 工具）的落地细化；§8 的 7 个 jsvmp.* 工具由 jsvmp 线维护，本文以 `jsvmp_*` 之名纳入 ToolRouter 统一暴露，不覆盖其语义。
-- **与 MCP 关系**：未来 `firefox-reverse-mcp` 是 ToolRouter 之上的薄 RPC 包装（复用同一注册表），与 camoufox-reverse-mcp 解耦（独立仓、独立进程）。
+- **与 MCP 关系**：未来 `browser-agent-mcp` 是 ToolRouter 之上的薄 RPC 包装（复用同一注册表），与 camoufox-reverse-mcp 解耦（独立仓、独立进程）。

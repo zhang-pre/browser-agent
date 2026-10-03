@@ -1,11 +1,11 @@
 # JSVMP 逆向工作流（实战 + 踩坑记录）
 
-> 本文记录 firefox-reverse 第一个真实项目（目标站点 目标SDK 签名参数）的完整工作流、关键决策、和**踩过的坑**。
+> 本文记录 browser-agent 第一个真实项目（目标站点 目标SDK 签名参数）的完整工作流、关键决策、和**踩过的坑**。
 > 后续做新 JSVMP 站点（淘宝 某接口 ua / 京东 _aladdin / 网易云 encSecKey / 美团 mtgsig 等）直接照这个走，**不要重蹈覆辙**。
 
 ## TL;DR
 
-**不要把 firefox-reverse 当 reverse engineering 的 IDE**。它的真实定位是**一次性 dump 关键数据**，然后**离线 Babel AST + LLM 分析**。
+**不要把 browser-agent 当 reverse engineering 的 IDE**。它的真实定位是**一次性 dump 关键数据**，然后**离线 Babel AST + LLM 分析**。
 
 错路（我走过）：
 - ❌ Per-op SpiderMonkey trace 反推 op 语义（天花板低，给不了语义）
@@ -22,7 +22,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Step 1: Dump 关键数据（firefox-reverse 在这里登场）      │
+│ Step 1: Dump 关键数据（browser-agent 在这里登场）      │
 │   - bytecode hex string / dispatcher source              │
 │   - 实参 (Phase B.3 MOZ_JSVMP_DUMP_ARGS=1)               │
 │   - 局部变量+闭包链 (Phase B.4 MOZ_JSVMP_DUMP_LOCALS=1    │
@@ -152,9 +152,9 @@
 
 ## 流程优化关键 insights
 
-### Insight 1: firefox-reverse 只 dump 一次性数据
+### Insight 1: browser-agent 只 dump 一次性数据
 **不要把 firefox 当 IDE**。完成 dump 后立刻关 firefox，所有分析在离线 Node 跑。
-- firefox-reverse 只做 4 件事：dump bytecode / dump dispatcher source col / dump closure consts / 提供 dispatcher PID
+- browser-agent 只做 4 件事：dump bytecode / dump dispatcher source col / dump closure consts / 提供 dispatcher PID
 - 离线 Babel + LLM 是分析主战场
 
 ### Insight 2: 远程编 Linux + Xvfb，比本地 mac 快 10×
@@ -178,7 +178,7 @@
 
 ## 工程量真实估算
 
-| 阶段 | 没工具 | 有 firefox-reverse + 工具链 |
+| 阶段 | 没工具 | 有 browser-agent + 工具链 |
 |------|--------|----------------------------|
 | dispatcher 定位 | 1-3 天（人工读 minified） | **5 分钟**（trace hot sid） |
 | bytecode 提取 | 1-2 天（修改 目标SDK inject console.log，触发自校验风险） | **30 秒**（dump_args，对 JSVMP 透明） |

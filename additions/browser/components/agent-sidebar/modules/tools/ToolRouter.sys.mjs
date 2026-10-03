@@ -3,7 +3,7 @@
  * 设计约束（沿用 A1）：
  * 1. 零 Firefox 依赖：纯逻辑，后端通过 DI 注入。绝不 import Services/ChromeUtils，
  *    以便 dev/selftest-toolrouter.mjs 在 Node 下直接 import 验证。
- * 2. Agent 与未来 firefox-reverse-mcp 共享同一注册表（见 docs/agent-native-capabilities.md §4）。
+ * 2. Agent 与未来 browser-agent-mcp 共享同一注册表（见 docs/agent-native-capabilities.md §4）。
  * 3. 后端无关：ToolRouter 只管「注册 / 列规格 / 派发 / 结果信封 / 截断」；
  *    具体能力（page/net/scripts/jsvmp/code）由各 backend 适配器实现，注入到 tool.handler 闭包。
  *

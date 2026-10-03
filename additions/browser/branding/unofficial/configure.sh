@@ -3,4 +3,4 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 MOZ_APP_DISPLAYNAME="Firefox Reverse"
-MOZ_MACBUNDLE_ID=firefox-reverse
+MOZ_MACBUNDLE_ID=browser-agent

@@ -12,7 +12,7 @@
  * 配置（环境变量，启动时一次性读取）：
  *   MOZ_JSVMP_TRACE=1                    总开关
  *   MOZ_JSVMP_TRACE_FILE=<path>          NDJSON 输出（自动追加 .<pid>）
- *                                        默认 /tmp/firefox-reverse-jsvmp-b.ndjson
+ *                                        默认 /tmp/browser-agent-jsvmp-b.ndjson
  *   MOZ_JSVMP_TRACE_SCRIPT=<substring>   filename 过滤（substring，非正则）
  *                                        强烈建议设上，否则全量 trace 量爆炸
  *   MOZ_JSVMP_TRACE_LIMIT=<n>            单进程最大记录行数（防爆盘），默认 1000000

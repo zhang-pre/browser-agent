@@ -1,7 +1,7 @@
 /* JsvmpBackend.sys.mjs — JSVMP trace 能力（读取 C++ 引擎层落盘的 NDJSON trace）。
  *
  * 原生 trace 由 JsvmpTraceCore.cpp 产生，启动期 env(MOZ_JSVMP_TRACE / _SCRIPT / _DUMP_*) 控制，
- * 默认落盘 /tmp/firefox-reverse-jsvmp-b.ndjson.<pid>（可被 MOZ_JSVMP_TRACE_FILE 覆盖）。
+ * 默认落盘 /tmp/browser-agent-jsvmp-b.ndjson.<pid>（可被 MOZ_JSVMP_TRACE_FILE 覆盖）。
  * 本后端从 Agent 侧读取/筛选这些记录。运行期开关需 C++ pref（后续），故 trace() 仅返回说明。
  */
 
@@ -18,7 +18,7 @@ function traceDir() {
   }
   return "/tmp";
 }
-const PREFIX = "firefox-reverse-jsvmp";
+const PREFIX = "browser-agent-jsvmp";
 
 // PathUtils.isAbsolute 在 Windows 只认反斜杠盘符路径（C:\…）；正斜杠的 C:/… 会被当成相对路径，
 // 拆段后 PathUtils.join(root,"C:",…) 拼成 <root>\C:\… 路径翻倍 → ENOENT（agent 常用正斜杠，真机实测踩到）。
@@ -609,7 +609,7 @@ export class JsvmpBackend {
   async status(_args, ctx) {
     const f = await this._findTrace(ctx);
     const pid = currentContentPid(ctx);
-    const ctlBase = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.ctl");
+    const ctlBase = PathUtils.join(traceDir(), "browser-agent-jsvmp.ctl");
     const ctlPath = pid ? ctlBase + "." + pid : ctlBase;
     let tracing = false;
     let ctlExists = false;
@@ -627,7 +627,7 @@ export class JsvmpBackend {
       const all = await IOUtils.getChildren(traceDir());
       jsvmpFilesInDir = all
         .map(x => PathUtils.filename(x))
-        .filter(n => n.startsWith("firefox-reverse-jsvmp"));
+        .filter(n => n.startsWith("browser-agent-jsvmp"));
     } catch {
       /* ignore */
     }
@@ -747,7 +747,7 @@ export class JsvmpBackend {
 
   /** 运行期 dump 配置文件路径（按当前标签内容进程 pid 区分，只配该进程）。 */
   _dumpPath(pid) {
-    return PathUtils.join(traceDir(), "firefox-reverse-jsvmp.dump." + pid);
+    return PathUtils.join(traceDir(), "browser-agent-jsvmp.dump." + pid);
   }
 
   /**
@@ -804,7 +804,7 @@ export class JsvmpBackend {
    */
   async trace({ action = "status", scriptUrl, actions, col, pc, env, depth, limit, skip, maxarr, vpcPc, vpcLimit } = {}, ctx) {
     // per-PID ctl：每个内容进程（标签页/会话）独享自己的控制文件，与 C++ MaybePollControlFile 一致。
-    const CTL_BASE = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.ctl");
+    const CTL_BASE = PathUtils.join(traceDir(), "browser-agent-jsvmp.ctl");
     const _pid = currentContentPid(ctx);
     const CTL = _pid ? CTL_BASE + "." + _pid : CTL_BASE;
     const dumpCfg = { actions, col, pc, env, depth, limit, skip, maxarr, vpcPc, vpcLimit };
@@ -906,7 +906,7 @@ export class JsvmpBackend {
           note: "无法确定当前标签的内容进程（先打开/聚焦目标页再 clear）。",
         };
       }
-      const CLR = PathUtils.join(traceDir(), "firefox-reverse-jsvmp.clear." + pid);
+      const CLR = PathUtils.join(traceDir(), "browser-agent-jsvmp.clear." + pid);
       await IOUtils.writeUTF8(CLR, String(Date.now()));
       // 等内容进程消费（它只在执行 JS 时轮询）。以"请求文件被删除"为已清空的确证信号。
       const { setTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");

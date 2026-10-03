@@ -5,7 +5,7 @@
  * Environment variables:
  *   MOZ_JSVMP_TRACE=1                    总开关
  *   MOZ_JSVMP_TRACE_FILE=<path>          输出 NDJSON 路径（自动追加 .<pid>）
- *                                        默认 /tmp/firefox-reverse-jsvmp.ndjson
+ *                                        默认 /tmp/browser-agent-jsvmp.ndjson
  *   MOZ_JSVMP_TRACE_SCRIPT=<substring>   只 trace filename 含此子串的 script
  *                                        默认无过滤（全部 trace）
  *   MOZ_JSVMP_TRACE_TICK_MS=<n>          手动 RequestInterruptCallback 周期
@@ -76,7 +76,7 @@ static void InitOnce() {
   const char* basePath = getenv("MOZ_JSVMP_TRACE_FILE");
   char baseBuf[1024];
   if (!basePath || !basePath[0]) {
-    snprintf(baseBuf, sizeof(baseBuf), "%s/firefox-reverse-jsvmp.ndjson", FrxTraceDir());
+    snprintf(baseBuf, sizeof(baseBuf), "%s/browser-agent-jsvmp.ndjson", FrxTraceDir());
     basePath = baseBuf;
   }
 

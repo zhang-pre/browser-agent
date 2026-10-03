@@ -1,16 +1,16 @@
 # Agent 侧边栏方案
 
-> firefox-reverse 浏览器内置 AI Agent 对话面板的可行性方案与实施规划。
+> browser-agent 浏览器内置 AI Agent 对话面板的可行性方案与实施规划。
 >
 > 类比产品：Brave Leo / Opera Aria / Edge Copilot / Arc Max / Cursor IDE。
 
 ## 1. 目标与定位
 
-在 firefox-reverse 浏览器侧边栏内置一个 AI Agent 对话面板,用户可：
+在 browser-agent 浏览器侧边栏内置一个 AI Agent 对话面板,用户可：
 
 - 在面板内选择模型、填写 API Key,直接与 LLM 对话
 - 让 Agent 调用浏览器底层 API,操作当前页面、读取 trace 数据、调整指纹/代理配置
-- 把 firefox-reverse 的六大模块(fingerprint / proxy / jsvmp-trace / network-analysis / cookie-js-analysis / property-trace)的数据,作为 Agent 的"上下文",做 JS 逆向辅助决策
+- 把 browser-agent 的六大模块(fingerprint / proxy / jsvmp-trace / network-analysis / cookie-js-analysis / property-trace)的数据,作为 Agent 的"上下文",做 JS 逆向辅助决策
 
 **差异化**:相比 Cursor 这类外挂工具,Agent 直接驻留在浏览器进程内,能拿到 C++ 层 trace、网络捕获、JS 落盘等普通扩展拿不到的数据。
 
@@ -24,14 +24,14 @@
 | **API Key** | **用户自行填写** | 不做代理服务器、不托管 Key,前端直连 LLM 厂商 API。隐私和成本责任在用户侧 |
 | **本地模型** | **不嵌入** | 全部走现成云端 API,避免打包体积膨胀几个 G |
 | **测试模型** | **DeepSeek V4** | 前期验证用,后续可扩展 OpenAI / Anthropic / Gemini / 国内其他模型 |
-| **维护边界** | **短期混入 patches/,长期拆独立子仓** | 初期 `patches/agent-ui/` 与引擎层补丁并存;成熟后拆出 `firefox-reverse-agent-ui/` 独立 git 仓库,与引擎层关注点解耦 |
+| **维护边界** | **短期混入 patches/,长期拆独立子仓** | 初期 `patches/agent-ui/` 与引擎层补丁并存;成熟后拆出 `browser-agent-agent-ui/` 独立 git 仓库,与引擎层关注点解耦 |
 
 ## 3. 实现路径 B 细化
 
 ### 3.1 模块位置
 
 ```
-firefox-reverse/
+browser-agent/
 ├── patches/
 │   └── agent-ui/                      ← 新增模块
 │       ├── README.md                   功能说明与状态
@@ -81,12 +81,12 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
 
 #### (d) 浏览器 API 控制通道(Agent → Browser)
 
-**这是核心**。Agent 的 `tool_use` 不只是"操作 DOM",而是能调用 firefox-reverse 的能力:
+**这是核心**。Agent 的 `tool_use` 不只是"操作 DOM",而是能调用 browser-agent 的能力:
 
 | Tool 类别 | 调用 | 实现 |
 |---|---|---|
 | 页面操作 | `navigate / click / type / scroll / screenshot` | 已有 Firefox Remote Agent (CDP/BiDi) 内部 API |
-| Trace 查询 | `query_jsvmp_trace / query_network / query_property_access` | TraceBridge → 读 `~/.firefox-reverse/traces/` 落盘文件 |
+| Trace 查询 | `query_jsvmp_trace / query_network / query_property_access` | TraceBridge → 读 `~/.browser-agent/traces/` 落盘文件 |
 | 配置热更新 | `set_fingerprint / set_proxy / toggle_hook` | 调用 fingerprint / proxy 模块的运行时配置接口 |
 | JS 执行 | `eval_in_page / hook_function` | content-script bridge,复用 camoufox-reverse-mcp 的 hook 模板思路 |
 
@@ -144,7 +144,7 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
 
 ### Track A4 — Trace 接入(差异化核心)
 
-- [ ] `TraceBridge.sys.mjs`:读取 `~/.firefox-reverse/traces/jsvmp/`、`network/`、`property/` 落盘文件
+- [ ] `TraceBridge.sys.mjs`:读取 `~/.browser-agent/traces/jsvmp/`、`network/`、`property/` 落盘文件
 - [ ] tools:`query_jsvmp_trace(filter)` / `query_network(filter)` / `query_property_access(filter)`
 - [ ] 等主线 Phase 2 (jsvmp-trace) 至少完成 Phase 2.A 后启动
 
@@ -160,8 +160,8 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
 ### Track A6 — 拆独立子仓
 
 - [ ] 评估时机:当 `patches/agent-ui/` 补丁数 > 15 且 `additions/.../agent-sidebar/` 源文件 > 30 个时
-- [ ] 新建 `firefox-reverse-agent-ui/` 私有仓
-- [ ] firefox-reverse 主仓只保留一个"安装入口" patch,UI 源码作为 git submodule 或独立分发
+- [ ] 新建 `browser-agent-agent-ui/` 私有仓
+- [ ] browser-agent 主仓只保留一个"安装入口" patch,UI 源码作为 git submodule 或独立分发
 - [ ] 长期目标:UI 仓的迭代节奏与引擎层解耦,UI 可单独发版
 
 ## 5. 风险与边界
@@ -169,7 +169,7 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
 | 风险 | 说明 | 应对 |
 |---|---|---|
 | **上游升级冲突** | sidebar 补丁脆弱,Mozilla 任何 UI 重构都可能冲突 | **不追上游**。锁定到当前 baseline,冲突由用户自行迭代解决 |
-| **omni.ja 重打包** | React 产物注入 omni.ja 流程繁琐 | 编译脚本里加一步 `pack-omni.sh`,放到 `firefox-reverse-build/scripts/` |
+| **omni.ja 重打包** | React 产物注入 omni.ja 流程繁琐 | 编译脚本里加一步 `pack-omni.sh`,放到 `browser-agent-build/scripts/` |
 | **API Key 泄漏** | 用户填的 Key 落地到 prefs.js 明文 | 文档明示风险,推荐 LoginManager 加主密码 |
 | **网络代理冲突** | LLM 调用走 fetch,会被 proxy 模块影响 | LlmClient 走 `nsIChannel` 时显式 bypass proxy(可配置) |
 | **隐私问题** | 用户可能误把页面内容 / cookie 发给 LLM | 默认 Agent 上下文不包含敏感字段,需用户显式授权 "把当前页 cookie 加入对话" |
@@ -186,12 +186,12 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
                │ 消费数据 / 调用配置 API
                ▼
 ┌────────────────────────────────────────────────────────────┐
-│              firefox-reverse 引擎层(六大模块)               │
+│              browser-agent 引擎层(六大模块)               │
 │  fingerprint │ proxy │ jsvmp-trace │ network │ cookie │ prop │
 └────────────────────────────────────────────────────────────┘
 ```
 
-- **Agent Sidebar 不替代 firefox-reverse-mcp**:MCP 仍然是给外部 Cursor / Claude 用的工具暴露层。两者可共存——同一个 ToolRouter 抽象,在内可被 sidebar Agent 直接调,在外可被 MCP server 包装暴露
+- **Agent Sidebar 不替代 browser-agent-mcp**:MCP 仍然是给外部 Cursor / Claude 用的工具暴露层。两者可共存——同一个 ToolRouter 抽象,在内可被 sidebar Agent 直接调,在外可被 MCP server 包装暴露
 - **数据流向**:引擎层 → 落盘 → TraceBridge 读取 → Agent 上下文。不直接走内存共享,保持隔离
 
 ## 7. 待补充事项
@@ -212,9 +212,9 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
 
 | Tool 名 | 输入 | 输出 | 实现路径 |
 |---------|------|------|---------|
-| `jsvmp.detect_dispatcher` | URL（默认当前页）| `{sid, file, col, hits}` 列表 | 调 firefox-reverse hook → trace → 按 hits 排序最热 script |
-| `jsvmp.dump_bytecode` | dispatcher sid | bytecode hex string | 调 firefox-reverse Phase B.3 dump_args，PC=0 触发 |
-| `jsvmp.dump_closure_consts` | dispatcher sid | `{q[], p[], xor_key}` | 调 firefox-reverse Phase B.4 dump_locals + envChain（待实现） |
+| `jsvmp.detect_dispatcher` | URL（默认当前页）| `{sid, file, col, hits}` 列表 | 调 browser-agent hook → trace → 按 hits 排序最热 script |
+| `jsvmp.dump_bytecode` | dispatcher sid | bytecode hex string | 调 browser-agent Phase B.3 dump_args，PC=0 触发 |
+| `jsvmp.dump_closure_consts` | dispatcher sid | `{q[], p[], xor_key}` | 调 browser-agent Phase B.4 dump_locals + envChain（待实现） |
 | `jsvmp.extract_handlers` | dispatcher source | `handlers.json`（含 pattern 自动命名）| `child_process` 调 `tools/dispatcher_split.js` |
 | `jsvmp.name_unknown_ops` | `handlers.json` 含 UNKNOWN | `handlers.json` 全命名 | 用 `LlmClient` 喂 UNKNOWN handler source 给 LLM，回写 inferred_name |
 | `jsvmp.disassemble` | handlers + bytecode + consts | 伪汇编文本 | 调 `tools/disassemble.js`（待补） |
@@ -239,7 +239,7 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
   - 跟 source code viewer 联动（点 PC 跳到对应 目标SDK col）
 
 - **NDJSON Trace Browser**（`TraceBrowser.jsx`）
-  - 浏览 `~/.firefox-reverse/traces/*.ndjson`
+  - 浏览 `~/.browser-agent/traces/*.ndjson`
   - 按 `ev` 字段过滤（`enter`/`op`/`call`/`prop_access`）
   - 按 sid / pc 范围 / opname filter
   - 折叠/展开嵌套调用栈
@@ -272,7 +272,7 @@ Firefox 已有 `SidebarUI` 框架(`browser/components/sidebar/`),通过 patch �
                │ child_process / IPC
                ▼
 ┌─────────────────────────────────────────────────────────┐
-│  firefox-reverse 引擎层 + tools/                         │
+│  browser-agent 引擎层 + tools/                         │
 │    - jsvmp-trace hook (Phase B.3)                       │
 │    - dispatcher_split.js (Babel AST 拆解)                │
 │    - disassemble.js (TBD)                                │
