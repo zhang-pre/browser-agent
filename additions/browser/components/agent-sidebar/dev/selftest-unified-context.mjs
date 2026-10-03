@@ -509,3 +509,36 @@ assert.equal(oversizedRepairAttempts, 2);
 assert.equal(failedEvidence.journal.compaction, null);
 assert.deepEqual(failedEvidence.journal.events, evidenceEventsBefore);
 console.log("OK evidence repair includes draft when it fits, bounds retries, and preserves history on failure");
+
+// Large windows should summarize in one or two serial calls, retaining budget checks.
+for (const windowTokens of [64000, 272000, 1000000]) {
+  for (const [historyRatio, expectedCalls] of [[0.55, 1], [0.9, 2]]) {
+    let calls = 0;
+    let active = false;
+    const source = [{ role: "user", content: "batch scaling task" },
+      ...Array.from({ length: 80 }, (_, i) => ({
+        role: "assistant", content: `record ${i}: ` + "x".repeat(Math.floor(windowTokens * historyRatio * 3 / 80)),
+      }))];
+    const scaled = await createUnifiedTurnContext({
+      contextWindowTokens: windowTokens,
+      messages: source,
+      client: { async chat(request, opts) {
+        assert.equal(active, false, "summary batches must stay serial");
+        active = true;
+        calls++;
+        if (calls > 1) assert.ok(request[1].content.includes(`scaled summary ${calls - 1}`),
+          "next batch must include the previous summary");
+        assert.ok(messagesTokens(request) + opts.maxTokens + Math.max(1024, Math.floor(windowTokens * 0.04)) <= windowTokens,
+          "summary request must leave its safety reserve");
+        await Promise.resolve();
+        active = false;
+        return { content: handoffJson(`scaled summary ${calls}`), finishReason: "stop" };
+      } },
+    });
+    const view = await scaled.forceCompact(1, scaled.initialMessages);
+    assert.equal(calls, expectedCalls, `${windowTokens} window with ${historyRatio} history`);
+    assert.equal(scaled.journal.events.length, source.length, "compaction must preserve raw history");
+    scaled.requestMessages(view);
+  }
+}
+console.log("OK proportional batches finish in one or two serial calls across working windows");

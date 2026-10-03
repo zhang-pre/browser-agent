@@ -181,7 +181,9 @@ export async function createUnifiedTurnContext({
     const task = taskCardText(state, plan.cutoffId - 1);
     const summaryOutput = Math.min(4096, Math.max(512, Math.floor(windowTokens * 0.16)));
     const summaryInput = windowTokens - retryOutput - summarySafety;
-    const maxSource = Math.max(256, Math.min(32000,
+    // Scale source batches with the working window so ordinary histories need
+    // one or two sequential summaries. Keep room for prompts, output and retries.
+    const maxSource = Math.max(256, Math.min(Math.floor(windowTokens * 0.7),
       summaryInput - estimateTokens(SUMMARY_PROMPT) - estimateTokens(task) - summaryOutput - 512));
     const chunks = sourceChunks(plan.evicted, maxSource);
     let handoff = null;
