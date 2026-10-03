@@ -28,6 +28,11 @@ SELFTESTS=(
   selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
   selftest-typography.mjs
+  selftest-mcp-extensions.mjs
+  selftest-mcp-client.mjs
+  selftest-mcp-manager.mjs
+  selftest-mcp-process.mjs
+  selftest-mcp-runtime.mjs
   selftest-mozbuild.mjs
   selftest-providers.mjs
   selftest-subscription.mjs

@@ -320,6 +320,7 @@ export class AgentTurnOrchestrator {
       systemPrompt,
       dynamicContext,
       autoApprove: !confirmMode,
+      mcpAutoApprove: !assist,
       assist,
       vision,
       maxRounds,
@@ -383,9 +384,7 @@ export class AgentTurnOrchestrator {
         this.runtimeCore.applyEvent(state, event);
         this.runtimeCore.notify(state);
       },
-      confirm: confirmMode
-        ? call => this._requestConfirmation(state, call)
-        : undefined,
+      confirm: call => this._requestConfirmation(state, call),
     };
   }
 
@@ -416,16 +415,26 @@ export class AgentTurnOrchestrator {
   }
 
   _requestConfirmation(state, call) {
-    if (this.runtimeCore.hasSteering(state) || state.aborted) return Promise.resolve(false);
-    if (state.approveAll) {
+    if (this.runtimeCore.hasSteering(state) || state.aborted || call.signal?.aborted) return Promise.resolve(false);
+    if (state.approveAll && !call.mcp) {
       return Promise.resolve(true);
     }
     return new Promise(resolve => {
+      const abort = () => {
+        if (state.pendingConfirm?.id === call.id) {
+          state.pendingConfirm = null;
+          this.runtimeCore.notify(state);
+        }
+        done(false);
+      };
+      const done = value => { call.signal?.removeEventListener("abort", abort); resolve(value); };
+      call.signal?.addEventListener("abort", abort, { once: true });
       state.pendingConfirm = {
         id: call.id,
         name: call.name,
         args: call.args,
-        resolve,
+        mcp: call.mcp,
+        resolve: done,
       };
       this.runtimeCore.notify(state);
     });

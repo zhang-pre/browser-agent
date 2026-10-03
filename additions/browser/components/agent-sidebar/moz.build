@@ -23,6 +23,8 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
 EXTRA_JS_MODULES.agentsidebar.host += [
     "modules/host/AgentSession.sys.mjs",
     "modules/host/FirefoxAgentRuntimeHost.sys.mjs",
+    "modules/host/FirefoxMcpService.sys.mjs",
+    "modules/host/FirefoxMcpTransport.sys.mjs",
     "modules/host/FirefoxOAuthCallback.sys.mjs",
     "modules/host/FirefoxSubscriptionAuth.sys.mjs",
 ]
@@ -36,6 +38,13 @@ EXTRA_JS_MODULES.agentsidebar.llm += [
     "modules/llm/LlmTransport.sys.mjs",
     "modules/llm/ReasoningEffort.sys.mjs",
     "modules/llm/Usage.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.mcp += [
+    "modules/mcp/McpClient.sys.mjs",
+    "modules/mcp/McpConfigStore.sys.mjs",
+    "modules/mcp/McpManager.sys.mjs",
+    "modules/mcp/McpSessionRequests.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.providers += [

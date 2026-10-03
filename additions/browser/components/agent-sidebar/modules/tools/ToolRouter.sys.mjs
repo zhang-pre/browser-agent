@@ -4,9 +4,8 @@
  * 1. 零 Firefox 依赖：纯逻辑，后端通过 DI 注入。绝不 import Services/ChromeUtils，
  *    以便 dev/selftest-toolrouter.mjs 在 Node 下直接 import 验证。
  * 2. Agent 与未来 firefox-reverse-mcp 共享同一注册表（见 docs/agent-native-capabilities.md §4）。
- * 3. 后端无关：ToolRouter 只管「注册 / 列规格 / 派发 / 结果信封」；
+ * 3. 后端无关：ToolRouter 只管「注册 / 列规格 / 派发 / 结果信封 / 截断」；
  *    具体能力（page/net/scripts/jsvmp/code）由各 backend 适配器实现，注入到 tool.handler 闭包。
- *    完整结果必须交给运行层先落盘再折叠，路由层不能提前丢弃正文。
  *
  * 工具规格 spec = {
  *   name:        string                          // 域_动作，如 "page_eval"
@@ -17,12 +16,13 @@
  * 结果信封 envelope = { ok:boolean, data?:any, error?:string, meta?:object }
  */
 
-const DEFAULT_MAX_CHARS = 20000; // 大结果提示阈值；运行层负责落盘和上下文预算
+const DEFAULT_MAX_CHARS = 20000; // 单次工具结果序列化上限，超出截断，防爆 LLM 上下文
 
 export class ToolRouter {
   /** @param {object} [opts] { maxChars } */
   constructor(opts = {}) {
     this._tools = new Map();
+    this._sourceContexts = new Map();
     this.maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   }
 
@@ -45,6 +45,10 @@ export class ToolRouter {
       description: spec.description || "",
       parameters: spec.parameters || { type: "object", properties: {} },
       handler: spec.handler,
+      sourceId: spec.sourceId,
+      mcp: spec.mcp,
+      getPolicy: spec.getPolicy,
+      approveAlways: spec.approveAlways,
       needsConfirm: !!spec.needsConfirm, // 改动型工具（执行 JS/导航/改包/落盘）需用户批准（A3 要求）
     });
     return this;
@@ -56,6 +60,43 @@ export class ToolRouter {
       this.register(s);
     }
     return this;
+  }
+
+  setSourceContext(id, text) { this._sourceContexts.set(id, text); }
+  sourceContext() { return [...this._sourceContexts].filter(([id]) => [...this._tools.values()].some(t => t.sourceId === id)).map(([, text]) => text).filter(Boolean).join("\n"); }
+  setPrepareHook(hook) { this._prepareHook = hook; return this; }
+  async prepare(ctx = {}) { await this._prepareHook?.(ctx); }
+
+  // Validate the entire replacement before modifying the live registry.
+  replaceSource(sourceId, specs) {
+    if (!sourceId) throw new Error("sourceId required");
+    const next = new ToolRouter({ maxChars: this.maxChars });
+    next._sourceContexts = new Map(this._sourceContexts);
+    next._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
+    next.registerAll((specs || []).map(spec => ({ ...spec, sourceId })));
+    this._tools = next._tools;
+    return this;
+  }
+  removeSource(sourceId) {
+    this._sourceContexts.delete(sourceId);
+    this._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
+  }
+  snapshot() {
+    const copy = new ToolRouter({ maxChars: this.maxChars });
+    copy._tools = new Map(this._tools);
+    copy._sourceContexts = new Map(this._sourceContexts);
+    return copy;
+  }
+  getPermission(name) {
+    const tool = this._tools.get(name);
+    if (!tool?.mcp) return null;
+    return { mcp: tool.mcp, policy: tool.getPolicy?.() || "ask" };
+  }
+  async approveAlways(name) {
+    const tool = this._tools.get(name);
+    if (!tool?.mcp || !tool.approveAlways) throw new Error("Persistent approval unavailable");
+    if (this.getPermission(name)?.policy === "deny") throw new Error("MCP tool disabled or denied");
+    await tool.approveAlways();
   }
 
   has(name) {
@@ -96,6 +137,13 @@ export class ToolRouter {
     if (!tool) {
       return { ok: false, error: `unknown tool "${name}"` };
     }
+    if (ctx.signal?.aborted) return { ok: false, error: "Tool call cancelled" };
+    if (tool.mcp) {
+      const permission = this.getPermission(name);
+      if (permission.policy === "deny" || (permission.policy !== "allow" && ctx.mcpApproved !== name)) {
+        return { ok: false, error: "MCP tool requires authorization or is denied", denied: true };
+      }
+    }
     const missing = this._missingRequired(tool.parameters, args);
     if (missing.length) {
       return { ok: false, error: `missing required param(s): ${missing.join(", ")}` };
@@ -104,7 +152,7 @@ export class ToolRouter {
       const data = await tool.handler(args || {}, ctx);
       return this._envelope(data);
     } catch (e) {
-      return { ok: false, error: e && e.message ? e.message : String(e) };
+      return { ok: false, error: e && e.message ? e.message : String(e), ...(e?.mcpError ? { mcpError: e.mcpError } : {}) };
     }
   }
 
@@ -115,7 +163,7 @@ export class ToolRouter {
     return req.filter(k => a[k] === undefined || a[k] === null);
   }
 
-  /** 包装信封，超大结果只标记、不截断，交运行层先保存完整产物。
+  /** 包装成功信封 + 按 maxChars 截断超大结果。
    * 例外：`data._media`（图像等二进制，如截图 dataURL）抽到信封顶层 `media`，
    * **不参与文本截断、也不进模型文本上下文**（由 AgentLoop 决定喂给视觉模型 / 显示给用户）。 */
   _envelope(data) {
@@ -137,7 +185,7 @@ export class ToolRouter {
       return attach({
         ok: true,
         data,
-        meta: { oversized: true, total_chars: str.length },
+        meta: { oversized: true, total_chars: str.length,},
       });
     }
     return attach({ ok: true, data });
