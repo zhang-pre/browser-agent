@@ -297,8 +297,7 @@ export async function runAgentTurn(p) {
   }
 
   const resultCap = 12000;
-  // Save the full tool envelope before projecting a bounded model preview.
-  try { router.maxChars = Number.MAX_SAFE_INTEGER; } catch {}
+  // ToolRouter preserves full envelopes; persist before projecting a bounded preview below.
 
   const emit = ev => {
     try {

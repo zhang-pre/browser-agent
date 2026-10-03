@@ -13,7 +13,7 @@
  * - Node 自测：无 IOUtils/Subprocess → 相关方法抛错，但模块仍可 import（纯逻辑可验证）。
  */
 
-const OUT_CAP = 200 * 1024; // 单次执行回传输出上限（ToolRouter 还会再截到 ~20KB）
+const OUT_CAP = 200 * 1024; // 单次执行回传输出上限（运行层先落盘，再折叠上下文）
 const READ_CAP = 512 * 1024; // fs_read 默认上限
 
 function lazyESM(url) {

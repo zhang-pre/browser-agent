@@ -3,6 +3,12 @@
 > 站点无关、通用。只用 Agent 自己的工具。目标：产出**不靠浏览器运行时**的 Node 复刻（补环境/纯算），实打接口返回有效数据。
 > 这份只教**怎么用工具走通常规链路**；具体怎么拆、何时换路，你自己判断。站点特例进 notes。
 
+## 当前工具边界与完整性
+- `net_get` 没有请求/响应 body，只包含已采集的 URL、方法、请求/响应头、状态和调用栈。文中“完整请求模板”需要另行取得 body 并验证编码、长度及内容；`hook_inject` 的默认请求日志对 body 做字符串转换，不能直接视为二进制/multipart/Request 流的真实字节。`captureBody:true` / `includeBody:true` 会明确报不支持。
+- `net_list` 默认取最近 100 条，`hasMore=true` 时把 `nextBeforeId` 作为 `beforeId` 取更早记录。`net_capture(action:clear)` 清证据与关联栈，保持捕获开关和请求 ID，不重置 cookie/storage；检查 `stacksCleared` 是否成功。
+- `scripts_list` 仅枚举顶层页面外部脚本 URL，使用 `nextOffset` 分页；不保证覆盖 inline/eval/Function/worker。`scripts_save` / `scripts_capture_all` 重新下载 URL，不是读运行时源码；检查失败项与 `partial`，不能把部分下载成功当作全部成功。
+- 路由层保留完整结果。对话运行层在工作目录可写时先保存大结果再折叠，返回路径用 `fs_read(offset,limit)` 读取；未设置目录或保存失败时保留正文，仍受上下文预算检查约束。后端自身声明的采样或截断不因此消失。
+
 ## 红线（4 条，记牢）
 1. **最终产物不靠浏览器跑加密**：node 补环境/纯算都行；开浏览器调 signer 当 runtime＝违规。浏览器只作分析/验证 oracle。从浏览器抓的**静态值**（cookie/登录态/风控令牌等）当输入用**不算违规**。
 2. **page_eval 全权、别自我设限**：在页面里**怎么方便怎么来**——读值 / 调现成 signer / **装 hook 记入参出参 / 改全局 / 重定义函数 / 注入脚本** 都行（页面 principal、`wantXrays:false`，`window.X=包装` 会真替换页面的 X，见「hook 日志大法」）。它是你**最趁手的分析工具**，别因为"应该只读"就退回笨重的 signer_trace。唯一边界是 #1（最终**产物**别靠浏览器跑加密）；强检测/JSVMP 站注入**可能被检测到**——那是你**自己权衡**要不要改用引擎层 trace，**不是禁令**。
@@ -82,7 +88,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 **5. P5 补环境闭环**：脚手架在 `.agent-tools/templates/`（`fs_copy` 拿现成改，别从零写）：自包含单文件混淆用 `node-env-loader.js`、纯 wasm-bindgen 用 `wasm-signer-loader.js`、**webpack/loadable 代码分割 chunk 用 `webpack-chunk-loader.js`**（见下「代码分割」）、拼请求用 `request-template.js`、**JSVMP「数据常量」收割（S-box/RC4 key/XXTEA delta/自定义 base64 表/魔数——VM 从字节码数组 GetElem 读出、`closure_read`/dump 都够不到时）用 `jsvmp-const-harvest.js`**（把字节码数组包成 logging 容器，记下 PC 读出的每个值 + 兜底 hook charCodeAt）、**VM 闭包内 `instantiate` 的小 WASM（算完整性 hash、无公开 glue、wasm_probe 够不到）日志用 `wasm-call-logger.js`**（加载前 monkeypatch `WebAssembly.instantiate/compile` 套 import/export 日志）。**报错驱动**：跑→读错→补**一个**最小缺失项→再跑。指纹用 `webapi_trace`(env 模式)/`wasm_probe` 抓的**真值**补，别瞎填。常见缺失：`window/document/navigator` 桩、`Object/Array/Date` 等构造器没挂全（VM 取 `window.X` 当 `new` → "is not a constructor"）、`globalThis.process` 没藏（wasm-bindgen getrandom 走 Node 分支崩）。**Node 21+ 的 `global.navigator` 是只读 getter**——补环境别 `global.navigator={…}` 赋值（抛 `Cannot set property navigator`），用 `Object.defineProperty(globalThis,'navigator',{value:{webdriver:false,…},configurable:true})`。
 - **复刻结果和浏览器对不上（分支/加密值不一致、偶尔空响应）别瞎试** → `whitebox_diff` 做**浏览器真值 vs Node 复刻**的引擎级差分（非侵入：浏览器侧 Debugger 覆盖、Node 侧 inspector 覆盖/wasm import 边界，**零 Proxy 包 env、零 AST 插桩**，难站点也测不到观测本身）：`action:start(scriptUrl)` → `page_navigate` 重载触发 → `action:query`（取浏览器真值）→ `action:node(entry:work/loader.cjs, kind:js|wasm)`（跑复刻覆盖）→ `action:diff(env:webapi导出的env真值)` → 直接告诉你**第一处走法不同的分支（源码行）+ 驱动它的 env 值**，按真值对齐补环境再跑。复刻里的崩溃/自杀（如探到 Node 的 `process` 后 abort）也会被拦截记栈。
 
-**6. P6 实打验证**：node 生成参数 → 拼完整请求模板（`net_get` 抓的真实请求当模版，稳定值 cookie/token 从浏览器拿）→ 打真实接口 → **非空有效**才算过；换多组输入再验。产出最小可运行示例到 `out/`。
+**6. P6 实打验证**：node 生成参数 → 拼完整请求模板（`net_get` 提供 URL/方法/头部；所需 body 另行观测并验证，稳定值 cookie/token 从浏览器拿）→ 打真实接口 → **非空有效**才算过；换多组输入再验。产出最小可运行示例到 `out/`。
 - **本地请求"非空但报错/被拒"时，先别怀疑算法**——签名往往是对的，是请求没和 `net_get` 的真实请求**逐字段对齐**。**一般往这几个方向排查**（一次只改一处，对照真实请求收敛）：
   ① **漏了必带字段**：cookie（尤其 httpOnly 的风控/会话 cookie）、token、UA、referer/origin、某个业务自定义头；
   ② **易变字段过期/错位**：时间戳（秒 vs 毫秒、时区、要不要用服务端时间）、nonce、requestId；
