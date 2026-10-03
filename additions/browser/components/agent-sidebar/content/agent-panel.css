@@ -745,6 +745,7 @@ body {
    ────────────────────────────────────────────────────────── */
 .agent-ws {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
@@ -823,6 +824,7 @@ body {
 .agent-ws__mode.is-assist { color: var(--in-content-page-color, FieldText); border-color: #6a8cff; }
 .agent-ws__mode.is-auto { color: var(--in-content-page-color, FieldText); border-color: var(--in-content-primary-button-background, Highlight); }
 .agent-ws__mode.is-unset { border-style: dashed; }
+.agent-ws__mode:disabled { opacity: 0.55; cursor: default; }
 .agent-ws__mode-ico { display: inline-flex; align-items: center; }
 .agent-ws__mode-ico svg { width: 13px; height: 13px; }
 .agent-ws__mode.is-assist .agent-ws__mode-ico { color: #6a8cff; }

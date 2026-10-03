@@ -210,6 +210,28 @@ const chromeImage = await br.dispatch(ba('picture'), {}, { mcpApproved: ba('pict
 assert.equal(chromeImage.media[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
 assert.equal(chromeImage.data.executionContext.browser, 'Chrome/Chromium');
 assert.equal((await br.dispatch(ba('error'), {}, { mcpApproved: ba('error') })).ok, false);
+// Disabled local tools must not reappear in adapter descriptions or result guidance.
+// Exercise the actual AgentLoop boundary, not only a string helper.
+const hiddenLocalNames = /\b(?:page_\w+|net_\w+|scripts_\w+|skill_\w+|code_search|signer_trace|hook_inject|find_param_entry|remember|recall)\b/;
+for (const toolName of ['select_page', 'new_page', 'navigate_page', 'list_network_requests']) {
+  let turns = 0;
+  await runAgentTurn({ router: br, messages: [], localToolsEnabled: false,
+    assist: true, maxRounds: 2, mcpAutoApprove: true,
+    client: { async chat(messages, options) {
+      assert(!hiddenLocalNames.test(JSON.stringify(options.tools)), 'tool definitions must not mention hidden local tools');
+      assert(!hiddenLocalNames.test(JSON.stringify(messages)), 'model context must not mention hidden local tools');
+      if (turns++ === 0) return { toolCalls: [{ id: toolName, type: 'function',
+        function: { name: ba(toolName), arguments: '{}' } }] };
+      const result = JSON.parse(messages.findLast(m => m.role === 'tool').content);
+      assert(result.ok);
+      assert.match(result.data.browserGuidance, /独立 Chrome\/Chromium/);
+      assert.match(result.data.browserGuidance, /本服务/);
+      assert.equal(result.data.content[0].text, 'No requests found.', 'upstream evidence remains unchanged');
+      return { content: 'done' };
+    } },
+  });
+}
+assert(br.has('page_navigate'), 'normal local registry remains available');
 bm.close();
 console.log('MCP browser context: identity, renamed/package servers, Firefox separation, empty evidence through AgentLoop, images and errors passed');
 

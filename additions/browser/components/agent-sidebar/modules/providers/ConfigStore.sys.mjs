@@ -101,6 +101,14 @@ export class ConfigStore {
     return !!this.b.persistent;
   }
 
+  getLocalToolsEnabled() {
+    return this.b.getString(PREF_PREFIX + "localToolsEnabled", "true") !== "false";
+  }
+
+  setLocalToolsEnabled(enabled) {
+    this.b.setString(PREF_PREFIX + "localToolsEnabled", String(enabled !== false));
+  }
+
   getSidebarFontScale() {
     return normalizeFontScale(this.b.getString(PREF_PREFIX + "ui.fontScale", "100"));
   }

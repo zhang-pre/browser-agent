@@ -55,6 +55,7 @@ function normalizeThread(t) {
   return {
     ...current,
     workspace: t.workspace || null,
+    localToolsEnabled: t.localToolsEnabled !== false,
     mode: t.mode === "auto" || t.mode === "assist" ? t.mode : null,
     envId: t.envId || null,
     modelStrategy: t.modelStrategy === "premium" ? "premium" : "balanced",
@@ -165,6 +166,7 @@ export class ConversationStore {
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
         workspace: t.workspace || null,
+        localToolsEnabled: t.localToolsEnabled !== false,
         mode: t.mode || null,
         envId: t.envId || null,
         modelStrategy: t.modelStrategy || "balanced",
@@ -188,7 +190,7 @@ export class ConversationStore {
     return t ? projectUnifiedMessages(t.unifiedContext || createUnifiedContext(t.messages)) : [];
   }
 
-  async createThread(title = NEW_TITLE, workspace = null, mode = null) {
+  async createThread(title = NEW_TITLE, workspace = null, mode = null, localToolsEnabled = true) {
     const d = await this._load();
     const now = nextTs();
     const t = {
@@ -197,6 +199,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: workspace || null,
+      localToolsEnabled: localToolsEnabled !== false,
       mode: ["auto", "assist"].includes(mode) ? mode : null,
       envId: null,
       modelStrategy: "balanced",
@@ -462,6 +465,7 @@ export class ConversationStore {
         title: cleanTitle(t.title),
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
+        localToolsEnabled: t.localToolsEnabled !== false,
         mode: t.mode || null,
         modelStrategy: t.modelStrategy === "premium" ? "premium" : "balanced",
         messages: t.messages.map((m, i) => cleanMessage(m, i)),
@@ -518,6 +522,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: null,
+      localToolsEnabled: src.localToolsEnabled !== false,
       mode: ["assist", "auto"].includes(src.mode)
         ? src.mode
         : null,

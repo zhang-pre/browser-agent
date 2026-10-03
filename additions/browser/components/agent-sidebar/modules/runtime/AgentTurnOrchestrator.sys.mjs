@@ -1,3 +1,4 @@
+import { mcpOnlyPrompt, workspaceContext } from "../tools/LocalCapabilityPolicy.sys.mjs";
 /* AgentTurnOrchestrator.sys.mjs — one Agent turn's application workflow.
  *
  * The orchestrator coordinates configuration, context projection, LLM/tool
@@ -137,6 +138,12 @@ export class AgentTurnOrchestrator {
   }
 
   async _prepare(context) {
+    const thread = await this.conversationStore.getThread(context.threadId);
+    context.localToolsEnabled = thread?.localToolsEnabled !== false;
+    if (!context.localToolsEnabled) {
+      context.systemPrompt = mcpOnlyPrompt(context.assist);
+      context.dynamicContext = workspaceContext(context.workspaceRoot);
+    }
     await this._consumeCancellationBoundary(context);
     context.backends = this.getBackends();
     context.toolContext = this._createToolContext({
@@ -316,6 +323,7 @@ export class AgentTurnOrchestrator {
     return {
       client: context.client,
       router: this.getRouter(),
+      localToolsEnabled: context.localToolsEnabled !== false,
       messages,
       systemPrompt,
       dynamicContext,
@@ -330,6 +338,7 @@ export class AgentTurnOrchestrator {
       consumeSteering: () => this._consumeSteering(context),
       toolCtx: toolContext,
       getLedger: async () => {
+        if (context.localToolsEnabled === false) return "";
         try {
           return await backends.ledger.digest({}, toolContext);
         } catch {
@@ -441,6 +450,7 @@ export class AgentTurnOrchestrator {
   }
 
   async _syncMemory(context) {
+    if (context.localToolsEnabled === false) return;
     const journal = await this.conversationStore.getUnifiedContext(context.threadId);
     for (const entry of journal?.memoryOutbox || []) {
       try {
@@ -488,6 +498,7 @@ export class AgentTurnOrchestrator {
   }
 
   async _completionMemory(context, retryOnly = false) {
+    if (context.localToolsEnabled === false) return;
     await runCompletionMemory({
       store: this.conversationStore, ledger: context.backends.ledger, client: context.client,
       threadId: context.threadId, workspaceRoot: context.workspaceRoot, toolContext: context.toolContext,

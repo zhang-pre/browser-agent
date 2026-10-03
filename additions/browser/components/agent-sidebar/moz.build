@@ -76,6 +76,7 @@ EXTRA_JS_MODULES.agentsidebar.state += [
 ]
 
 EXTRA_JS_MODULES.agentsidebar.tools += [
+    "modules/tools/LocalCapabilityPolicy.sys.mjs",
     "modules/tools/ToolRouter.sys.mjs",
     "modules/tools/Tools.sys.mjs",
 ]

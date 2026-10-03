@@ -16,6 +16,8 @@
  * 结果信封 envelope = { ok:boolean, data?:any, error?:string, meta?:object }
  */
 
+import { localToolVisible, deepToolDocumentation } from "./LocalCapabilityPolicy.sys.mjs";
+
 const DEFAULT_MAX_CHARS = 20000; // 单次工具结果序列化上限，超出截断，防爆 LLM 上下文
 
 export class ToolRouter {
@@ -81,9 +83,11 @@ export class ToolRouter {
     this._sourceContexts.delete(sourceId);
     this._tools = new Map([...this._tools].filter(([, t]) => t.sourceId !== sourceId));
   }
-  snapshot() {
+  snapshot({ localToolsEnabled = true } = {}) {
     const copy = new ToolRouter({ maxChars: this.maxChars });
-    copy._tools = new Map(this._tools);
+    copy._tools = new Map([...this._tools].filter(([, t]) =>
+      localToolsEnabled || t.mcp || localToolVisible(t.name)
+    ).map(([name, t]) => [name, !localToolsEnabled && !t.mcp ? deepToolDocumentation(t) : t]));
     copy._sourceContexts = new Map(this._sourceContexts);
     return copy;
   }

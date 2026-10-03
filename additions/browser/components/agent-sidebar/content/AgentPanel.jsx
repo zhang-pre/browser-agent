@@ -1,4 +1,5 @@
 import McpRequestPanel from "./McpRequestPanel.jsx";
+import { mcpOnlyPrompt, workspaceContext, localToolVisible } from "../modules/tools/LocalCapabilityPolicy.sys.mjs";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import MarkdownContent from "./MarkdownContent.jsx";
 
@@ -273,6 +274,8 @@ const _CI = typeof Components !== "undefined" ? Components.interfaces : typeof C
 const _SVC = typeof Services !== "undefined" ? Services : null;
 
 export default function AgentPanel({ buildClient, conversations, store, router, runAgentTurn, session, isVisionModel, workspace, skill, toolNames = [], onOpenEnvironment, onOpenSettings, hidden = false }) {
+  const [localToolsEnabled, setLocalToolsEnabled] = useState(() => store?.getLocalToolsEnabled?.() !== false);
+  const [switchingCapabilities, setSwitchingCapabilities] = useState(false);
   const [memoryView, setMemoryView] = useState(null);
   const [taskCompleted, setTaskCompleted] = useState(false);
   const [messages, setMessages] = useState([]); // 仅 user/assistant
@@ -359,7 +362,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         let id = (latest && session && session.acquireThread) ? session.acquireThread([latest], ownerRef.current) : latest;
         let t = id ? await conversations.getThread(id) : null;
         if (!t) {
-          t = await conversations.createThread(); // 本窗口独立的新空线程（默认不绑目录，需手动「打开目录」）
+          t = await conversations.createThread(undefined, null, null, store?.getLocalToolsEnabled?.() !== false); // 本窗口独立的新空线程（默认不绑目录，需手动「打开目录」）
           id = t.id;
           if (session && session.acquireThread) {
             session.acquireThread([id], ownerRef.current);
@@ -373,6 +376,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           setUsage(t.usage || null);
           bindWorkspace(effectiveWorkspace(t));
           setMode((t && t.mode) || null);
+          setLocalToolsEnabled(t?.localToolsEnabled !== false);
           refreshThreads();
         }
       } catch (e) {
@@ -552,6 +556,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             if (t) {
               bindWorkspace(effectiveWorkspace(t));
               setMode((t && t.mode) || null);
+              setLocalToolsEnabled(t?.localToolsEnabled !== false);
             }
           } catch (_e) { /* ignore */ }
           setBusy(true); // 启「续看」流式轮询 useEffect（deps 含 busy）
@@ -624,10 +629,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     if (currentId) {
       return currentId;
     }
-    const t = await conversations.createThread(); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
+    const t = await conversations.createThread(undefined, null, null, store?.getLocalToolsEnabled?.() !== false); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
     setCurrentId(t.id);
     bindWorkspace(effectiveWorkspace(t));
     setMode((t && t.mode) || null);
+    setLocalToolsEnabled(t?.localToolsEnabled !== false);
     return t.id;
   }
 
@@ -839,7 +845,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
 
   async function send() {
     const text = input.trim();
-    if (!text || busy || sendingRef.current) {
+    if (!text || busy || switchingCapabilities || sendingRef.current) {
       return;
     }
     sendingRef.current = true;
@@ -871,10 +877,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       // Stable provider-cache prefix: only invariant policy stays in system.
       // Workspace and Skill catalog are attached to the current user
       // message by AgentLoop as dynamic context.
-      let sys = SYSTEM +
-        "\n\n【浏览器环境】环境隔离、指纹配置和 MCP 指定环境由 env_* 工具链处理；Agent 对话页不做环境选择。";
+      let sys = localToolsEnabled ? SYSTEM +
+        "\n\n【浏览器环境】环境隔离、指纹配置和 MCP 指定环境由 env_* 工具链处理；Agent 对话页不做环境选择。" : mcpOnlyPrompt(mode === "assist");
       const dynamicParts = [
-        workspaceDir
+        !localToolsEnabled ? workspaceContext(workspaceDir) : workspaceDir
           ? `【当前工作目录】${workspaceDir}\n用 fs_list/fs_read/fs_write 读写其中文件、run_node/run_python 在此目录执行脚本验证；jsvmp trace 自动镜像到其 jsvmp/ 子目录。把抓取的脚本、还原出的实现、笔记都存到这里。`
           : "【当前工作目录】未设置。若任务需要读写文件或执行脚本，请提示用户点击侧边栏顶部「打开目录」选择一个本地目录。",
       ];
@@ -892,10 +898,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           /* 持久化失败不影响本会话内生效 */
         }
       }
-      sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
+      if (localToolsEnabled) sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
       // 只注入 Skill 元数据，正文由 Agent 按需 skill_get，避免每轮把整个知识库塞进上下文。
       try {
-        const catalog = skill && skill.list
+        const catalog = localToolsEnabled && skill && skill.list
           ? await skill.list({}, { workspaceRoot: workspaceDir || null })
           : null;
         if (catalog && catalog.ok && Array.isArray(catalog.skills) && catalog.skills.length) {
@@ -981,8 +987,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     }
   }
 
-  async function newChat() {
-    const t = await conversations.createThread(); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
+  async function newChat(enabled = store?.getLocalToolsEnabled?.() !== false, workspace = null) {
+    const t = await conversations.createThread(undefined, workspace, null, enabled);
+    setLocalToolsEnabled(enabled);
     if (session && session.acquireThread) {
       session.acquireThread([t.id], ownerRef.current); // 认领新线程（预留）→ 别的窗口认领不到，不会串对话
     }
@@ -1003,6 +1010,19 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     setActiveTool(null);
     setPendingConfirm(null);
     refreshThreads();
+  }
+
+  async function toggleLocalCapabilities() {
+    if (busy || switchingCapabilities || sendingRef.current || session?.isRunning(currentId)) return;
+    setSwitchingCapabilities(true);
+    try {
+      const enabled = !localToolsEnabled;
+      await newChat(enabled, workspaceDir);
+      store?.setLocalToolsEnabled?.(enabled);
+      setNotice("已新建干净会话并保留工作目录；原会话保存在历史中。" + (enabled ? "本地常规能力已开启。" : "本地常规能力已关闭，使用 MCP 与本地深度工具。"));
+    } catch (e) {
+      setError("切换失败：" + (e?.message || e));
+    } finally { setSwitchingCapabilities(false); }
   }
 
   // 选模式：按会话持久化（一选定整条会话沿用，除非用户再点切换）。在 fresh 线程上选时先 ensureThread 落地线程。
@@ -1042,6 +1062,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       setError(null);
       bindWorkspace(effectiveWorkspace(t));
       setMode((t && t.mode) || null);
+      setLocalToolsEnabled(t?.localToolsEnabled !== false);
       // 切线程：先清掉上一条会话的实时显示，再按**目标线程**是否在后台跑同步 busy——
       // 切到没在跑的会话要清掉旧的"正在跑"界面；切到仍在后台跑的会话则续看。
       resetSteps();
@@ -1140,7 +1161,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         </span>
         <span className="agent-panel__actions">
           <button type="button" onClick={() => setShowHistory(v => !v)} title="历史对话" aria-label="历史对话">{ICONS.history}</button>
-          <button type="button" onClick={newChat} title="新对话" aria-label="新对话">{ICONS.plus}</button>
+          <button type="button" onClick={() => newChat()} title="新对话" aria-label="新对话">{ICONS.plus}</button>
           <button type="button" className="agent-panel__envButton" onClick={onOpenEnvironment} title="环境管理" aria-label="环境管理">
             {ICONS.env}
             <span>环境管理</span>
@@ -1209,6 +1230,16 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
               ? "全自动"
               : "选模式"}
           </span>
+        </button>
+        <button
+          type="button"
+          className={`agent-ws__mode ${localToolsEnabled ? "is-auto" : ""}`}
+          aria-pressed={localToolsEnabled}
+          disabled={busy || switchingCapabilities}
+          onClick={toggleLocalCapabilities}
+          title="切换会新建干净会话并保留工作目录。关闭时隐藏本地普通工具、Skills、历史记忆注入及内置逆向流程；保留 MCP、深度分析和文件执行工具。"
+        >
+          本地常规：{localToolsEnabled ? "开" : "关"}
         </button>
         <span
           className="agent-ws__usage"
@@ -1293,11 +1324,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
                 <div className="agent-mode-pick__title">这个会话怎么跟我配合？</div>
                 <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("auto")}>
                   <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeAuto}</span>全自动</span>
-                  <span className="agent-mode-pick__desc">给我目标接口/参数，我一条龙自主搞定（侦察→定位→验证→补环境→实打），中途不打扰你。</span>
+                  <span className="agent-mode-pick__desc">{localToolsEnabled ? "给我目标接口/参数，我一条龙自主搞定（侦察→定位→验证→补环境→实打），中途不打扰你。" : "按目标自主使用 MCP 与深度工具，完成后报告结果。"}</span>
                 </button>
                 <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("assist")}>
                   <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeAssist}</span>AI辅助</span>
-                  <span className="agent-mode-pick__desc">我先给方案，之后每做完一个阶段（入口定位 / 字节trace / DOM-API trace / 构造实现）就停下汇报、给你方向选项，你来选、逐步推进。</span>
+                  <span className="agent-mode-pick__desc">{localToolsEnabled ? "我先给方案，之后每做完一个阶段（入口定位 / 字节trace / DOM-API trace / 构造实现）就停下汇报、给你方向选项，你来选、逐步推进。" : "按你的指令执行，在需要你决策时汇报并等待。"}</span>
                 </button>
                 <div className="agent-mode-pick__hint">选完仍可随时点顶部模式标切换。</div>
               </div>
@@ -1305,7 +1336,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             {mode && <>问点什么开始……</>}
             {toolNames.length > 0 && (
               <div className="agent-panel__tools-hint">
-                已接入 {toolNames.length} 个工具：页面 / 网络 / 代码 / 扩展 / 指纹环境 / JSVMP
+                已接入 {localToolsEnabled ? toolNames.length : toolNames.filter(n => localToolVisible(n) || n.startsWith("mcp_")).length} 个工具：{localToolsEnabled ? "页面 / 网络 / 代码 / 扩展 / 指纹环境 / JSVMP" : "MCP / JSVMP / WASM / 本地文件与执行"}
               </div>
             )}
           </div>

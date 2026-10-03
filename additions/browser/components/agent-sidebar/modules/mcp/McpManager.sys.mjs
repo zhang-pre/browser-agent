@@ -60,12 +60,12 @@ function executionContext(entry) {
 function browserGuidance(entry, toolName) {
   if (executionContext(entry).browser !== "Chrome/Chromium") return "";
   const alias = name => entry.tools.some(tool => tool.name === name) ? mcpToolAlias(entry.config.id, name) : name;
-  let guidance = "[目标：独立 Chrome/Chromium；不是 Firefox 当前标签页] 此服务不共享内置 Firefox 工具的页面、Cookie、请求 ID 或断点。对同一现场的导航、触发、采集、调试必须使用本服务工具。";
+  let guidance = "[目标：独立 Chrome/Chromium] 页面、Cookie、请求 ID 和断点属于本服务会话。对同一现场的导航、触发、采集、调试必须使用本服务工具。";
   if (["select_page", "new_page", "navigate_page", "list_network_requests"].includes(toolName)) {
-    guidance += ` 先用 ${alias("select_page")} 核对页面 URL；空白页用 ${alias("new_page")} 打开目标。需要重放采集时先开启采集，再用 ${alias("navigate_page")} 刷新 Chrome；不能用内置 page_navigate 代替。`;
+    guidance += ` 先用 ${alias("select_page")} 核对页面 URL；空白页用 ${alias("new_page")} 打开目标。需要重放采集时先开启采集，再用 ${alias("navigate_page")} 刷新 Chrome。`;
   }
   if (toolName === "list_network_requests") {
-    guidance += " 空结果先检查本服务的页面和采集时机，不代表 Firefox 没有请求。cookieName 查询响应 Set-Cookie，不覆盖 document.cookie 写入。";
+    guidance += " 空结果先检查本服务的页面和采集时机，不应推断其他浏览器的请求状态。cookieName 查询响应 Set-Cookie，不覆盖 document.cookie 写入。";
   }
   if (toolName === "evaluate_script") guidance += " 页面脚本报错不会回滚已安装的 Hook；重新注入前先恢复原函数，无法恢复时说明影响并刷新页面重建现场。";
   guidance += " 本地 js-reverse 会在回合开始前将所选工作目录加入 allowedRoots；文件参数的相对路径按本会话工作目录解析。HTTP 服务的文件权限仍由远端管理。";
