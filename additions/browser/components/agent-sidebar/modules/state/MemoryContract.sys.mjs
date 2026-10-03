@@ -2,7 +2,7 @@ export const SUMMARY_PROMPT = `维护 Web 逆向任务的累计执行状态。�
 你只能更新执行状态，不得修改任务卡中的有效目标。未知结论不得升级为已验证；矛盾实验标记待验证。精确签名/密文/请求体引用原始产物，不重新抄写。
 本次输入按日志 ID 顺序排列。只输出一个 JSON 对象，不加 Markdown 围栏：
 {"schemaVersion":1,"summary":"累计状态（含矛盾、环境差异、当前阶段）","facts":[],"hypotheses":[],"deadends":[],"decisions":[],"artifacts":[],"observations":[],"nextAction":"下一步"}
-每个数组项必须有 text、status、evidenceIds（整数日志 ID 数组）。status 只能是 verified、unverified、rejected、superseded 四者之一（所有数组均适用）；待验证或不确定使用 unverified，不使用 pending、unknown、confirmed 等其他值。facts 仅可放有实验证据的 verified 结论；hypotheses 默认 unverified；deadends 必须 verified 且填写 conditions（失败实验的适用条件），单次失败不得概括为永不重试。artifact 项额外填写 artifact:{path,version或hash}。其他类型按实际状态填写。未知、矛盾或只有失败证据的结论留在 hypotheses/observations；严禁为了满足格式升级为 verified。summary 必须包含下一步。只引用输入中的证据 ID。`;
+每个数组项必须有 text、status、evidenceIds（整数日志 ID 数组）。status 只能是 verified、unverified、rejected、superseded 四者之一（所有数组均适用）；待验证或不确定使用 unverified，不使用 pending、unknown、confirmed 等其他值。所有数组中 status=verified 的条目都必须有非空 evidenceIds，包括 hypotheses、decisions、artifacts、observations；文字 evidence 或产物路径不能替代日志 ID。没有证据的计划、决策和观察使用 unverified；无法支持的 facts/deadends 应移入 hypotheses/observations 并标记 unverified，不得编造 ID。facts 仅可放有实验证据的 verified 结论；hypotheses 默认 unverified；deadends 必须 verified 且填写 conditions（失败实验的适用条件），单次失败不得概括为永不重试。artifact 项额外填写 artifact:{path,version或hash}。其他类型按实际状态填写。未知、矛盾或只有失败证据的结论留在 hypotheses/observations；严禁为了满足格式升级为 verified。summary 必须包含下一步。只引用输入中的证据 ID。`;
 
 // Shared wire contract. Validation establishes structure/provenance, not truth.
 export const MEMORY_KINDS = ["fact", "hypothesis", "deadend", "decision", "artifact", "observation"];
@@ -44,23 +44,31 @@ export function parseHandoff(text, events, coveredThrough) {
   const memories = [];
   for (const [field, kind] of Object.entries(HANDOFF_FIELDS)) {
     if (!Array.isArray(value[field])) throw new Error("handoff missing " + field);
-    for (const item of value[field]) {
-      if (!Array.isArray(item.evidenceIds) || item.evidenceIds.some(id =>
-        !Number.isSafeInteger(id) || id < 1 || id > coveredThrough || events[id - 1]?.id !== id)) {
-        throw new Error("handoff references unknown or uncovered evidence");
+    for (const [index, item] of value[field].entries()) {
+      try {
+        if (!item || typeof item !== "object") throw new Error("memory item must be an object");
+        if (!Array.isArray(item.evidenceIds) || item.evidenceIds.some(id =>
+          !Number.isSafeInteger(id) || id < 1 || id > coveredThrough || events[id - 1]?.id !== id)) {
+          throw new Error("handoff references unknown or uncovered evidence");
+        }
+        if (["fact", "deadend"].includes(kind) && !item.evidenceIds.length) throw new Error("verified memory needs evidence IDs");
+        if (item.status === "verified" && !item.evidenceIds.length) {
+          throw new Error("verified memory requires evidence: evidenceIds must contain source log IDs; use unverified when no supporting evidence exists, never invent IDs");
+        }
+        const memory = normalizeMemory({ ...item, kind, evidence: "",
+          evidenceRefs: item.evidenceIds.map(eventId => ({ threadId: "pending", eventId })) });
+        // A failed/aborted tool result cannot by itself establish a verified fact.
+        if (kind === "fact" && item.evidenceIds.every(id => {
+          const e = events[id - 1];
+          if (e.role !== "tool") return false;
+          try { const v = JSON.parse(e.content); return v.ok === false || v.data?.ok === false || v.data?.aborted === true; } catch { return false; }
+        })) throw new Error("failed evidence cannot establish fact");
+        memories.push({ ...memory, evidenceRefs: [], evidenceIds: [...new Set(item.evidenceIds)],
+          evidenceArtifacts: item.evidenceIds.flatMap(eventId => events[eventId - 1].artifact
+            ? [{ eventId, ...events[eventId - 1].artifact }] : []) });
+      } catch (error) {
+        throw new Error(`${field}[${index}]: ${error.message}`);
       }
-      if (["fact", "deadend"].includes(kind) && !item.evidenceIds.length) throw new Error("verified memory needs evidence IDs");
-      const memory = normalizeMemory({ ...item, kind, evidence: "",
-        evidenceRefs: item.evidenceIds.map(eventId => ({ threadId: "pending", eventId })) });
-      // A failed/aborted tool result cannot by itself establish a verified fact.
-      if (kind === "fact" && item.evidenceIds.every(id => {
-        const e = events[id - 1];
-        if (e.role !== "tool") return false;
-        try { const v = JSON.parse(e.content); return v.ok === false || v.data?.ok === false || v.data?.aborted === true; } catch { return false; }
-      })) throw new Error("failed evidence cannot establish fact");
-      memories.push({ ...memory, evidenceRefs: [], evidenceIds: [...new Set(item.evidenceIds)],
-        evidenceArtifacts: item.evidenceIds.flatMap(eventId => events[eventId - 1].artifact
-          ? [{ eventId, ...events[eventId - 1].artifact }] : []) });
     }
   }
   return { schemaVersion: 1, summary: value.summary.trim(), nextAction: value.nextAction.trim(), memories };

@@ -87,3 +87,19 @@ const failedClaim = JSON.parse(handoffJson("unsupported"));
 failedClaim.facts = [{ text: "success", status: "verified", evidenceIds: [3] }];
 assert.throws(() => parseHandoff(JSON.stringify(failedClaim), failedJournal.events, 3), /failed evidence/);
 console.log("OK nested failed tool envelope cannot alone establish fact");
+
+for (const field of ["hypotheses", "decisions", "artifacts", "observations"]) {
+  const draft = JSON.parse(handoffJson("state"));
+  const item = { text: "unsupported claim", status: "verified", evidenceIds: [],
+    evidence: "free text must not replace IDs",
+    ...(field === "artifacts" ? { artifact: { path: "work/result.json", version: "1" } } : {}) };
+  draft[field] = [item];
+  assert.throws(() => parseHandoff(JSON.stringify(draft), journal.events, 2),
+    error => error.message.startsWith(field + "[0]: verified memory requires evidence"));
+  item.status = "unverified";
+  assert.equal(parseHandoff(JSON.stringify(draft), journal.events, 2).memories[0].status, "unverified");
+  item.status = "verified";
+  item.evidenceIds = [2];
+  assert.equal(parseHandoff(JSON.stringify(draft), journal.events, 2).memories[0].status, "verified");
+}
+console.log("OK all verified memory kinds require source IDs and report the offending field/index");

@@ -465,3 +465,47 @@ await assert.rejects(invalidStatusOnly.forceCompact(1, invalidStatusOnly.initial
 assert.equal(invalidStatusOnly.journal.compaction, null);
 assert.deepEqual(invalidStatusOnly.journal.events, invalidStatusEvents);
 console.log("OK invalid status receives budgeted repair feedback without weakening validation or losing history");
+
+const unsupportedHandoff = JSON.parse(handoffJson("next: check result"));
+unsupportedHandoff.decisions = [{ text: "try a different approach", status: "verified", evidenceIds: [] }];
+let evidenceAttempts = 0;
+const evidenceRetry = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    evidenceAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    assert.match(request[0].content, /所有数组中 status=verified/);
+    if (evidenceAttempts === 1) return { content: JSON.stringify(unsupportedHandoff), finishReason: "stop" };
+    assert.match(request[1].content, /decisions\[0\]: verified memory requires evidence/);
+    assert.ok(request[1].content.includes(JSON.stringify(unsupportedHandoff)));
+    const repaired = structuredClone(unsupportedHandoff);
+    repaired.decisions[0].status = "unverified";
+    return { content: JSON.stringify(repaired), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+await evidenceRetry.forceCompact(1, evidenceRetry.initialMessages);
+assert.equal(evidenceAttempts, 2);
+assert.equal(evidenceRetry.journal.compaction.handoff.memories[0].status, "unverified");
+
+let oversizedRepairAttempts = 0;
+const oversizedDraft = { ...unsupportedHandoff, summary: "x".repeat(50000) };
+const failedEvidence = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    oversizedRepairAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    if (oversizedRepairAttempts === 2) {
+      assert.match(request[1].content, /decisions\[0\]: verified memory requires evidence/);
+      assert.ok(!request[1].content.includes(oversizedDraft.summary));
+    }
+    return { content: JSON.stringify(oversizedDraft), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+const evidenceEventsBefore = structuredClone(failedEvidence.journal.events);
+await assert.rejects(failedEvidence.forceCompact(1, failedEvidence.initialMessages), /verified memory requires evidence/);
+assert.equal(oversizedRepairAttempts, 2);
+assert.equal(failedEvidence.journal.compaction, null);
+assert.deepEqual(failedEvidence.journal.events, evidenceEventsBefore);
+console.log("OK evidence repair includes draft when it fits, bounds retries, and preserves history on failure");

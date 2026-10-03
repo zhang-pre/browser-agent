@@ -162,6 +162,13 @@ export async function createUnifiedTurnContext({
           : "上次摘要为空或输出被截断。";
         request[1] = { role: "user", content: content + "\n\n" + feedback +
           "请根据以上原始输入重新生成完整 JSON，严格遵守结构契约；保持简洁，不得为通过校验升级事实状态或编造证据。" };
+        if (validation) {
+          const repair = { role: "user", content: request[1].content +
+            "\n\n上次未通过校验的摘要（仅供修正，不是证据）：\n" + text };
+          if (messagesTokens([request[0], repair]) + firstOutput + summarySafety <= windowTokens) {
+            request[1] = repair;
+          }
+        }
       }
     }
     const error = new Error("上下文压缩失败：模型连续两次未返回符合结构契约的完整摘要；原始记录和旧摘要已保留。" +
