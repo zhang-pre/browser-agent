@@ -185,17 +185,23 @@ export async function createUnifiedTurnContext({
     // one or two sequential summaries. Keep room for prompts, output and retries.
     const maxSource = Math.max(256, Math.min(Math.floor(windowTokens * 0.7),
       summaryInput - estimateTokens(SUMMARY_PROMPT) - estimateTokens(task) - summaryOutput - 512));
-    const chunks = sourceChunks(plan.evicted, maxSource);
-    let handoff = null;
+    let remaining = plan.evicted;
+    let handoff = state.compaction?.handoff || null;
     let summary = plan.previousSummary;
-    for (const chunk of chunks) {
-      const content = `任务卡（只读）：\n${task}\n\n上一版累计状态：\n${summary || "（无）"}\n\n本次新增日志：\n${eventSource(chunk)}`;
+    while (remaining.length) {
+      const prior = (handoff ? JSON.stringify(handoff) : summary) || "（无）";
+      const budget = Math.min(maxSource, summaryInput - estimateTokens(SUMMARY_PROMPT) -
+        estimateTokens(task) - estimateTokens(prior) - 512);
+      if (budget < 256) throw new Error("cumulative evidence exceeds summary budget; shorten the handoff before continuing");
+      const chunk = sourceChunks(remaining, budget)[0];
+      const content = `任务卡（只读）：\n${task}\n\n上一版累计状态：\n${(handoff ? JSON.stringify(handoff) : summary) || "（无）"}\n\n本次新增日志：\n${eventSource(chunk)}`;
       if (estimateTokens(content) + estimateTokens(SUMMARY_PROMPT) > summaryInput) {
         throw new Error("summary request exceeds model context budget");
       }
       const next = await summaryText(content, summaryOutput, "summary", chunk.at(-1).id);
       handoff = mergeHandoffs(handoff, next);
       summary = next.summary;
+      remaining = remaining.slice(chunk.length);
     }
     return handoff;
   }
@@ -237,7 +243,7 @@ export async function createUnifiedTurnContext({
           taskCardVersion: state.taskCard.version, snapshotHead: state.lastId,
           beforeTokens: current,
         };
-        const handoff = await rewriteText(previous.summary, taskCardText(state, previous.coveredThrough), previous.evidenceRefs, previous.coveredThrough);
+        const handoff = mergeHandoffs(previous.handoff, await rewriteText(JSON.stringify(previous.handoff || previous.summary), taskCardText(state, previous.coveredThrough), previous.evidenceRefs, previous.coveredThrough));
         const shorter = handoff.summary;
         const candidate = commitUnifiedRewrite(state, snapshot, shorter, { handoff });
         const after = messagesTokens(build(candidate)) + toolTokens;
@@ -262,7 +268,7 @@ export async function createUnifiedTurnContext({
     let candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
     let after = messagesTokens(build(candidate)) + toolTokens;
     if (after > hardInput) {
-      handoff = mergeHandoffs(handoff, await rewriteText(summary, taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs, candidate.compaction.coveredThrough));
+      handoff = mergeHandoffs(handoff, await rewriteText(JSON.stringify(handoff), taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs, candidate.compaction.coveredThrough));
       summary = handoff.summary;
       candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
       after = messagesTokens(build(candidate)) + toolTokens;

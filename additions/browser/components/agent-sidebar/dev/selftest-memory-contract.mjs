@@ -103,3 +103,22 @@ for (const field of ["hypotheses", "decisions", "artifacts", "observations"]) {
   assert.equal(parseHandoff(JSON.stringify(draft), journal.events, 2).memories[0].status, "verified");
 }
 console.log("OK all verified memory kinds require source IDs and report the offending field/index");
+
+// A retracted assertion replaces its old status, without deleting differently scoped experiments.
+const retiredValue = { ...value, facts: [{ ...value.facts[0], status: "superseded" }], hypotheses: [] };
+const retired = parseHandoff(JSON.stringify(retiredValue), journal.events, 2);
+const merged = mergeHandoffs(handoff, retired);
+assert.equal(merged.memories.find(m => m.text === "observed result").status, "superseded");
+assert.equal(merged.memories.filter(m => m.text === "observed result").length, 1);
+const scoped = mergeHandoffs({ memories: [
+  { kind: "deadend", text: "no hook", conditions: "Firefox", status: "verified" },
+]}, { memories: [
+  { kind: "deadend", text: "no hook", conditions: "jsdom", status: "verified" },
+] });
+assert.equal(scoped.memories.length, 2);
+const { projectUnifiedMessages } = await import("../modules/state/UnifiedContext.sys.mjs");
+const projected = projectUnifiedMessages({ ...journal, compaction: {
+  coveredThrough: 2, summary: "old summary", handoff: merged,
+} });
+assert(projected.some(m => m.content.includes("失效结论") && m.content.includes("superseded")));
+console.log("OK explicit retractions survive merging/projection and preserve distinct conditions");

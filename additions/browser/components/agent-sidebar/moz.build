@@ -12,6 +12,7 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
     "modules/backends/JsvmpBackend.sys.mjs",
     "modules/backends/LedgerBackend.sys.mjs",
     "modules/backends/NativeFingerprintPolicy.sys.mjs",
+    "modules/backends/NativeTraceHealth.sys.mjs",
     "modules/backends/NetworkBackend.sys.mjs",
     "modules/backends/PageBackend.sys.mjs",
     "modules/backends/ScriptsBackend.sys.mjs",

@@ -1,3 +1,4 @@
+import { NativeTraceHealth } from "./NativeTraceHealth.sys.mjs";
 /* JsvmpBackend.sys.mjs — JSVMP trace 能力（读取 C++ 引擎层落盘的 NDJSON trace）。
  *
  * 原生 trace 由 JsvmpTraceCore.cpp 产生，启动期 env(MOZ_JSVMP_TRACE / _SCRIPT / _DUMP_*) 控制，
@@ -38,6 +39,12 @@ function agentWin(ctx) {
 }
 
 export class JsvmpBackend {
+  _traceHealth = new NativeTraceHealth();
+
+  async health(_args, ctx) {
+    return { ok: true, ...(await this._traceHealth.check(currentContentPid(ctx), await this._findTrace(ctx))) };
+  }
+
   constructor({ traceFile, getWorkspaceRoot, workspace } = {}) {
     this._fixed = traceFile || null;
     this._workspace = workspace || null;
@@ -563,7 +570,8 @@ export class JsvmpBackend {
     const env = Services.env || Cc["@mozilla.org/process/environment;1"]?.getService(Ci.nsIEnvironment);
     const fromEnv = safe(() => env && env.get("MOZ_JSVMP_TRACE_FILE"));
     if (fromEnv) {
-      return fromEnv;
+      const pid = currentContentPid(ctx);
+      return pid && PathUtils.filename(fromEnv).endsWith("." + pid) ? fromEnv : null;
     }
     let files = [];
     try {
@@ -586,24 +594,10 @@ export class JsvmpBackend {
     const pid = currentContentPid(ctx);
     if (pid) {
       const hit = cands.find(f => PathUtils.filename(f).endsWith("." + pid));
-      if (hit) {
-        return hit;
-      }
+      return hit || null;
     }
-    // 退回最新的一份
-    let best = null;
-    let bestT = -1;
-    for (const f of cands) {
-      try {
-        const s = await IOUtils.stat(f);
-        const t = s.lastModified || 0;
-        if (t > bestT) {
-          bestT = t;
-          best = f;
-        }
-      } catch {}
-    }
-    return best;
+    return null;
+
   }
 
   async status(_args, ctx) {
@@ -641,11 +635,7 @@ export class JsvmpBackend {
       contentPid: pid, // 当前标签页内容进程 pid
       readingContentProcess: fileForContent, // true=正在读网页内容进程的 trace（页面脚本）
       diag: { traceDir: traceDir(), ctlPath, ctlExists, jsvmpFilesInDir }, // Windows trace 排障
-      note: tracing
-        ? f
-          ? "trace 已开启且有记录，可用 jsvmp_query 读取。"
-          : "trace 已开启但还没记录；到目标页触发 JS（刷新/交互/请求）再 jsvmp_query。"
-        : "trace 未开启。**调用 jsvmp_trace(action:'start') 即可运行期开启，无需重启浏览器**，再触发目标页 JS，然后 jsvmp_query。",
+      note: "tracing 仅表示控制文件配置，hasTrace 仅表示文件存在，不证明本次采集有效。开启后触发目标，用 deep_health(engine:'jsvmp') 验证新增记录；两次无记录应停止观测。",
     };
   }
 
@@ -673,7 +663,7 @@ export class JsvmpBackend {
         ok: true,
         count: 0,
         records: [],
-        note: "还没有 trace 记录。先 jsvmp_trace(action:'start') 开启（运行期，无需重启），再触发目标页 JS 生成参数，然后再 jsvmp_query。",
+        note: "没有当前 Firefox PID 的 trace 记录。用 deep_health 检查本次采集；两次无新增记录就停止观测并回到主路线。",
       };
     }
     const CAP = 16 * 1024 * 1024;
@@ -831,6 +821,7 @@ export class JsvmpBackend {
       }
       // 强制纯解释器：关 blinterp/baseline/ion，否则热函数(如签名/混淆 dispatcher)被 JIT 接管、
       // 绕过 js::Interpret(hook 所在层) → 反复调用抓不到。trace 期间走解释器，stop 再恢复。
+      await this._traceHealth.arm(_pid, await this._findTrace(ctx));
       this._setJit(false);
       const body = "1\n" + filter;
       await IOUtils.writeUTF8(CTL, body);
@@ -874,6 +865,7 @@ export class JsvmpBackend {
       };
     }
     if (action === "stop") {
+      this._traceHealth.stop(_pid);
       await IOUtils.writeUTF8(CTL, "0");
       this._setJit(true); // 恢复 JIT
       // 关掉运行期 dump（写 off，避免遗留配置在下次 start 时仍触发）

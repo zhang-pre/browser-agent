@@ -140,7 +140,17 @@ export class LedgerBackend {
     const rows = await db.execute("SELECT memory_key,kind,status,text,ev,payload,site,ts,workspace FROM memory_v2" + (allWorkspaces ? "" : " WHERE workspace=:ws") + " ORDER BY id DESC", allWorkspaces ? {} : { ws });
     const all = rows.map(r => this._row(r));
     const superseded = new Set(all.flatMap(x => x.supersedes || []));
-    return all.map(x => superseded.has(x.id) ? { ...x, status: "superseded" } : x);
+    // Explicit retractions override older versions of the same scoped claim.
+    // Keep unrelated environments/conditions separate and retain every raw row.
+    const latest = new Map();
+    return all.map(x => {
+      const key = JSON.stringify([x.workspace, x.site, x.kind, x.text, x.conditions || ""]);
+      const newer = latest.get(key);
+      if (!newer) latest.set(key, x);
+      if (superseded.has(x.id)) return { ...x, status: "superseded" };
+      return newer && ["rejected", "superseded"].includes(newer.status)
+        ? { ...x, status: newer.status } : x;
+    });
   }
 
   _row(r) {

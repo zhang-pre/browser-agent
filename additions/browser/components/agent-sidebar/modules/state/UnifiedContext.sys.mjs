@@ -131,8 +131,17 @@ export function projectUnifiedMessages(state) {
   const out = [];
   const card = taskCardText(state, covered);
   if (card) out.push({ role: "user", content: card, _contextSynthetic: true });
+  const evidenceLimits = (state.compaction?.handoff?.memories || []).filter(m =>
+    m.kind === "deadend" || ["rejected", "superseded"].includes(m.status));
+  if (evidenceLimits.length) {
+    out.push({ role: "user", _contextSynthetic: true, content:
+      "【证据适用范围与失效结论】以下失效条目不得作为前提；失败仅在所列条件成立，不排除整个算法或路线。\n" +
+      JSON.stringify(evidenceLimits.map(({ kind, text, status, conditions, evidenceIds }) =>
+        ({ kind, text, status, conditions, evidenceIds }))) });
+  }
   if (state.compaction?.summary) {
-    out.push({ role: "user", content: `【累计执行状态】\n${state.compaction.summary}${state.compaction.handoff?.nextAction ? "\n【下一步】" + state.compaction.handoff.nextAction : ""}`, _contextSynthetic: true });
+    const position = evidenceLimits.length ? out.length - 1 : out.length;
+    out.splice(position, 0, { role: "user", content: `【累计执行状态】\n${state.compaction.summary}${state.compaction.handoff?.nextAction ? "\n【下一步】" + state.compaction.handoff.nextAction : ""}`, _contextSynthetic: true });
   }
   for (const event of state.events) {
     if (event.id > covered) out.push({ ...modelMessage(event), _contextEventId: event.id });

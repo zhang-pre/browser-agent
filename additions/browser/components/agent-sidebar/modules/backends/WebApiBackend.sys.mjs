@@ -1,3 +1,4 @@
+import { NativeTraceHealth } from "./NativeTraceHealth.sys.mjs";
 /* WebApiBackend.sys.mjs — 读取/控制 C++ 引擎层「通用 Web-API 调用追踪」(WebApiTraceCore.cpp)。
  *
  * 在 GenericGetter/GenericMethod trampoline 里记录 interface.member(args)→return 到 per-pid NDJSON。
@@ -27,6 +28,12 @@ function agentWin(ctx) {
 }
 
 export class WebApiBackend {
+  _traceHealth = new NativeTraceHealth();
+
+  async health(_args, ctx) {
+    return { ok: true, ...(await this._traceHealth.check(currentContentPid(ctx), await this._findTrace(ctx))) };
+  }
+
   /** @param {object} [opts] { workspace?: WorkspaceBackend(getRoot) } —— 有工作目录就把指纹清单落盘到 <root>/webapi/。 */
   constructor({ workspace } = {}) {
     this._workspace = workspace || null;
@@ -120,27 +127,14 @@ export class WebApiBackend {
     if (!cands.length) {
       return null;
     }
-    // 页面脚本跑在内容进程；优先选当前标签内容进程那份，否则取最新。
+    // 只读取当前内容进程，不能借用其他标签页或父进程的记录。
     const pid = currentContentPid(ctx);
     if (pid) {
       const hit = cands.find(f => PathUtils.filename(f).endsWith("." + pid));
-      if (hit) {
-        return hit;
-      }
+      return hit || null;
     }
-    let best = null;
-    let bestT = -1;
-    for (const f of cands) {
-      try {
-        const s = await IOUtils.stat(f);
-        const t = s.lastModified || 0;
-        if (t > bestT) {
-          bestT = t;
-          best = f;
-        }
-      } catch {}
-    }
-    return best;
+    return null;
+
   }
 
   async status(_args, ctx) {
@@ -162,9 +156,7 @@ export class WebApiBackend {
       contentPid: pid,
       traceDir: traceDir(),
       ctlPath,
-      note: tracing
-        ? "Web-API trace 已开启。触发目标操作(交互/请求/签名)后 webapi_query 读 interface.member(args)→return。"
-        : "未开启。webapi_trace(action:'start', filter?) 运行期开启(无需重启)，再触发目标操作，然后 webapi_query。",
+      note: "tracing 仅表示控制文件配置，hasTrace 仅表示文件存在。开启后触发目标，用 deep_health(engine:'webapi') 验证本次新增记录；两次无记录应停止观测。",
     };
   }
 
@@ -191,6 +183,7 @@ export class WebApiBackend {
       }
       const body = "1\n" + flt;
       const ctlPath = this._ctlPath(ctx);
+      await this._traceHealth.arm(currentContentPid(ctx), await this._findTrace(ctx));
       await IOUtils.writeUTF8(ctlPath, body);
       return {
         ok: true,
@@ -205,6 +198,7 @@ export class WebApiBackend {
       };
     }
     if (action === "stop") {
+      this._traceHealth.stop(currentContentPid(ctx));
       const ctlPath = this._ctlPath(ctx);
       await IOUtils.writeUTF8(ctlPath, "0");
       return { ok: true, action: "stop", control: ctlPath };

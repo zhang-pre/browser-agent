@@ -30,8 +30,12 @@ assert(router.has("page_eval"), "shared registry is not mutated");
 assert(router.snapshot().has("skill_get"), "normal conversations retain all tools");
 assert(filtered.sourceContext().includes("REMOTE_INSTRUCTIONS"));
 assert(!JSON.stringify(filtered.listSpecs()).match(/skill_get|page_eval|scripts_save|signer_trace|P0|P6/));
+for (const name of ["deep_target", "deep_run", "deep_health", "jsvmp_trace", "webapi_trace"]) assert(mcpOnlyPrompt().includes(name));
 assert(!mcpOnlyPrompt().match(/skill_get|P0|P6|补环境|不靠浏览器/));
 
+assert(mcpOnlyPrompt().includes("按缺失证据选择工具"));
+assert(mcpOnlyPrompt().includes("黑盒目标先验证最短"));
+assert(!mcpOnlyPrompt().includes("优先评估 jsvmp_trace"));
 let prepared = 0, ledgerReads = 0, chats = 0;
 router.setPrepareHook(() => { prepared++; });
 const result = await runAgentTurn({

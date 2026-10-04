@@ -32,6 +32,7 @@ const T = (name, description, parameters, need, call) => ({
 /** 改动型工具：执行前需用户批准（A3 要求；只读类如 *_list/*_get/code_search/jsvmp_query 不需要）。 */
 const CONFIRM_TOOLS = new Set([
   "addons_manage",
+  "deep_run",
   "page_eval",
   "page_navigate",
   "page_click",
@@ -59,6 +60,28 @@ const CONFIRM_TOOLS = new Set([
 /** 全部内置工具的声明表（声明 ≠ 注册；注册由 backend 在场决定）。 */
 function toolTable() {
   return [
+    T("deep_health",
+      "原生观测健康检查：在 start 后实际触发目标，再检查当前 Firefox PID 是否产生本次新增记录。captured=true 后才继续深入；连续两次无新增记录应停止相应 trace，记录限制并回到 MCP 主路线。配置成功和旧 trace 文件不算证据。",
+      { type: "object", properties: { engine: { type: "string", enum: ["jsvmp", "webapi"] } }, required: ["engine"] },
+      b => typeof b.jsvmp?.health === "function" && typeof b.webapi?.health === "function",
+      (b, a, ctx) => {
+        if (!["jsvmp", "webapi"].includes(a.engine)) throw new Error("engine 必须为 jsvmp 或 webapi");
+        return b[a.engine].health(a, ctx);
+      }),
+    T("deep_target",
+      "确认原生深度分析的当前 Firefox 目标，返回 targetId、documentId、PID、URL 和 ready。不属于 MCP 浏览器；导航后再次确认。",
+      { type: "object", properties: {} }, b => typeof b.page?.deepTarget === "function",
+      (b, a, ctx) => b.page.deepTarget(a, ctx)),
+    T("deep_run",
+      "仅用于 Firefox 原生深度分析的运行入口。navigate 打开目标 URL；reload 刷新；evaluate 在目标页面执行 expression（可触发函数或点击）。先用 deep_target 取得 targetId；reload/evaluate 还需当前 documentId。导航/刷新只返回已发起，随后确认 ready 和 PID；进程变化需重新开启 trace，文档级观测需重新安装。先准备目标，再开启观测，再触发、查询、停止。磁盘源码需显式执行并添加 sourceURL 与 trace 的 scriptUrl 匹配；不会自动修改分支或注入密钥。",
+      { type: "object", properties: {
+        action: { type: "string", enum: ["navigate", "reload", "evaluate"] },
+        targetId: { type: "string" }, documentId: { type: "string" },
+        url: { type: "string" }, expression: { type: "string" },
+        awaitPromise: { type: "boolean", default: true }, saveTo: { type: "string" },
+      }, required: ["action", "targetId"] }, b => typeof b.page?.deepRun === "function",
+      (b, a, ctx) => b.page.deepRun(a, ctx)),
+
     // ───────── Firefox 扩展（backend: addons；AMO + AddonManager）─────────
     T(
       "addons_query",
@@ -1181,7 +1204,7 @@ function toolTable() {
  * @returns {Array<{name,description,parameters,handler}>}
  */
 export function createBuiltinTools(backends = {}) {
-  const firefoxTool = name => /^(page_|net_|scripts_|env_|addons_|webapi_)/.test(name) ||
+  const firefoxTool = name => /^(deep_|page_|net_|scripts_|env_|addons_|webapi_)/.test(name) ||
     ["cookies", "hook_inject", "find_param_entry", "signer_trace", "closure_read", "jsvmp_trace", "jsvmp_query", "jsvmp_status", "whitebox_diff"].includes(name);
   return toolTable()
     .filter(t => {
