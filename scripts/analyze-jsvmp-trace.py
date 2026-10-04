@@ -2,7 +2,7 @@
 """
 JSVMP trace post-processor.
 
-Reads NDJSON trace produced by firefox-reverse Phase B (JsvmpTraceCore),
+Reads NDJSON trace produced by browser-agent Phase B (JsvmpTraceCore),
 identifies JSVMP dispatcher candidates, dumps function-level analysis.
 
 Usage:

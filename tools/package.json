@@ -1,5 +1,5 @@
 {
-  "name": "firefox-reverse-tools",
+  "name": "browser-agent-tools",
   "version": "0.1.0",
   "description": "JSVMP dispatcher Babel-AST 拆解工具 + 反汇编器",
   "private": true,

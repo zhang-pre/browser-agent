@@ -1,3 +1,5 @@
+import McpRequestPanel from "./McpRequestPanel.jsx";
+import { mcpOnlyPrompt, workspaceContext, localToolVisible } from "../modules/tools/LocalCapabilityPolicy.sys.mjs";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import MarkdownContent from "./MarkdownContent.jsx";
 
@@ -14,10 +16,14 @@ import MarkdownContent from "./MarkdownContent.jsx";
  * @param {() => void} [props.onOpenSettings]
  */
 
-const TITLE = "Firefox-Reverse-Agent";
-const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化助手，可调用工具直接操作浏览器：分析页面、自动点击/滑动/填表、抓包、搜代码、追踪加密/签名参数的生成算法。
+const TITLE = "browser-agent-Agent";
+const SYSTEM = `你是 browser-agent 浏览器内置的 JS 逆向与自动化助手，可调用工具直接操作浏览器：分析页面、自动点击/滑动/填表、抓包、搜代码、追踪加密/签名参数的生成算法。
+
+【浏览器归属与 MCP】Firefox 是你的宿主，不代表所有工具都操作 Firefox。内置 page_*/net_*/scripts_*/cookies/探针操作 Firefox；js-reverse MCP 操作独立 Chrome/Chromium。用户指定使用 MCP 或需要其网络正文/断点等能力时，在该 MCP 的 Chrome 中打开目标并完成整条导航→采集→触发→调试流程；本地 fs_*/run_node/run_python/记忆仍可配合。先用该服务 select_page 核对 URL，about:blank 时用该服务 new_page 打开目标。不要在 Firefox 导航后查询 Chrome 的网络，也不要跨浏览器复用请求 ID、Cookie、闭包或断点。MCP 返回空记录时先检查同一服务的目标页与采集时机，再开启采集并在同一 Chrome 刷新，不能据此断言目标没有请求。切换浏览器必须说明并重新建立现场；旧对话若声称 js-reverse 操作 Firefox，以当前工具的 executionContext 为准。工具调用成功不等于拿到了有效证据；结果中的 transport/connection 说明服务连接方式，不说明模型部署位置。
 
 工具清单与参数你已在 function 列表里看到，这里不重复；只给必须时刻记住的核心，**完整方法论调 \`skill_get\` 读全文**。
+
+【当前采集边界】\`net_get\` 只提供已捕获的 URL、方法、头部、状态和调用栈，没有请求/响应 body；不能把它当作完整请求模板。需要 body 时另行观测并验证编码和完整性，hook 中的 String(body) 不保证是原始字节。\`scripts_list\` 只枚举顶层页面外部脚本 URL；\`scripts_save\`/\`scripts_capture_all\` 会重新下载资源，不保证等于浏览器当时执行的源码。网络列表用 nextBeforeId、脚本列表用 nextOffset 继续分页；工具大结果按落盘路径分段读。
 
 【做逆向：先 skill_get】做签名/加密参数逆向前，**先调一次 \`skill_get\`** 把方法论（一页流：决策树→常规执行链 6 步→工具速查）拉进上下文，并自动释放 node 补环境/请求脚手架到工作目录（fs_copy 拿现成改）。开工也先 \`recall\` 看本站历史。
 
@@ -25,7 +31,7 @@ const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化�
 
 【先判难度·简单站先走快车道】抓到接口**先看目标参数"长什么样"**(长度/字符集/是否 base64/有没有同发毫秒时间戳)——多数是**标准算法**(MD5/SHA/HMAC/AES/DES)，**别急着扣代码**：\`signer_trace\`/\`webapi_trace\` 抓 signer **真实入参** → 本地 \`crypto\` 对同一入参跑「候选算法×拼接模板」与真实值**逐字节比**，对上即收工(一行混淆都不用读)。**hook 不到入参 或 确认非官方算法**才降档到"扣最小片段进 vm→WASM→JSVMP"。trace **先 arm 再触发**(首屏就发的接口先开 trace 再 \`page_navigate\` 重载，否则只抓到 init 噪声)。详见 skill_get 决策树 ①→⑤。
 
-【两阶段（详见 skill_get）】① **Node 可用版**：定位+\`scripts_save(toWorkspace)\` 落 signer → \`webapi_trace\`/\`webapi_query\` 抓指纹 → 用 \`net_get\` 抓**完整请求当模版**、逐步剥参数定位"真正的门" → \`npm_install\` 补环境只生成加密参数、其余稳定值(cookie/token)可从浏览器拿 → **以本地实打目标接口、返回有效数据为准**(不是"签名看着对")。② **白盒纯算**：\`jsvmp_trace\` 看 VM + 监控 node 链路 → 纯 .js/.py 逐字节对比。
+【两阶段（详见 skill_get）】① **Node 可用版**：定位+\`scripts_save(toWorkspace)\` 落 signer → \`webapi_trace\`/\`webapi_query\` 抓指纹 → 用 \`net_get\` 取请求 URL/方法/头部，另行观测并验证所需 body 后构造请求模板、逐步剥参数定位"真正的门" → \`npm_install\` 补环境只生成加密参数、其余稳定值(cookie/token)可从浏览器拿 → **以本地实打目标接口、返回有效数据为准**(不是"签名看着对")。② **白盒纯算**：\`jsvmp_trace\` 看 VM + 监控 node 链路 → 纯 .js/.py 逐字节对比。
 
 【阶段门（skill_get §3.5 全文）】严格按 P0侦察→P1定位生成点→**P2 先验证再逆向**→P3判型→P4选策略(黑盒优先)→P5补环境→P6实打验证。**铁律：没用已知输入在浏览器复现出真实 wire 值(P2)前，禁止进字节码反汇编**——逆错对象是最大时间黑洞。**wire 参数 ≠ 最显眼 signer 的输出**(常见 wire=wrapper(signer,其它))，**永远 diff 真实样本**验证；格式/长度/前缀不符=没找对，回上一层。红旗(格式不符/长度对不上/偶尔为空)**必停**别忽略。
 
@@ -268,6 +274,8 @@ const _CI = typeof Components !== "undefined" ? Components.interfaces : typeof C
 const _SVC = typeof Services !== "undefined" ? Services : null;
 
 export default function AgentPanel({ buildClient, conversations, store, router, runAgentTurn, session, isVisionModel, workspace, skill, toolNames = [], onOpenEnvironment, onOpenSettings, hidden = false }) {
+  const [localToolsEnabled, setLocalToolsEnabled] = useState(() => store?.getLocalToolsEnabled?.() !== false);
+  const [switchingCapabilities, setSwitchingCapabilities] = useState(false);
   const [memoryView, setMemoryView] = useState(null);
   const [taskCompleted, setTaskCompleted] = useState(false);
   const [messages, setMessages] = useState([]); // 仅 user/assistant
@@ -354,7 +362,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         let id = (latest && session && session.acquireThread) ? session.acquireThread([latest], ownerRef.current) : latest;
         let t = id ? await conversations.getThread(id) : null;
         if (!t) {
-          t = await conversations.createThread(); // 本窗口独立的新空线程（默认不绑目录，需手动「打开目录」）
+          t = await conversations.createThread(undefined, null, null, store?.getLocalToolsEnabled?.() !== false); // 本窗口独立的新空线程（默认不绑目录，需手动「打开目录」）
           id = t.id;
           if (session && session.acquireThread) {
             session.acquireThread([id], ownerRef.current);
@@ -368,6 +376,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           setUsage(t.usage || null);
           bindWorkspace(effectiveWorkspace(t));
           setMode((t && t.mode) || null);
+          setLocalToolsEnabled(t?.localToolsEnabled !== false);
           refreshThreads();
         }
       } catch (e) {
@@ -547,6 +556,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             if (t) {
               bindWorkspace(effectiveWorkspace(t));
               setMode((t && t.mode) || null);
+              setLocalToolsEnabled(t?.localToolsEnabled !== false);
             }
           } catch (_e) { /* ignore */ }
           setBusy(true); // 启「续看」流式轮询 useEffect（deps 含 busy）
@@ -619,10 +629,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     if (currentId) {
       return currentId;
     }
-    const t = await conversations.createThread(); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
+    const t = await conversations.createThread(undefined, null, null, store?.getLocalToolsEnabled?.() !== false); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
     setCurrentId(t.id);
     bindWorkspace(effectiveWorkspace(t));
     setMode((t && t.mode) || null);
+    setLocalToolsEnabled(t?.localToolsEnabled !== false);
     return t.id;
   }
 
@@ -834,7 +845,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
 
   async function send() {
     const text = input.trim();
-    if (!text || busy || sendingRef.current) {
+    if (!text || busy || switchingCapabilities || sendingRef.current) {
       return;
     }
     sendingRef.current = true;
@@ -866,10 +877,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       // Stable provider-cache prefix: only invariant policy stays in system.
       // Workspace and Skill catalog are attached to the current user
       // message by AgentLoop as dynamic context.
-      let sys = SYSTEM +
-        "\n\n【浏览器环境】环境隔离、指纹配置和 MCP 指定环境由 env_* 工具链处理；Agent 对话页不做环境选择。";
+      let sys = localToolsEnabled ? SYSTEM +
+        "\n\n【浏览器环境】环境隔离、指纹配置和 MCP 指定环境由 env_* 工具链处理；Agent 对话页不做环境选择。" : mcpOnlyPrompt(mode === "assist");
       const dynamicParts = [
-        workspaceDir
+        !localToolsEnabled ? workspaceContext(workspaceDir) : workspaceDir
           ? `【当前工作目录】${workspaceDir}\n用 fs_list/fs_read/fs_write 读写其中文件、run_node/run_python 在此目录执行脚本验证；jsvmp trace 自动镜像到其 jsvmp/ 子目录。把抓取的脚本、还原出的实现、笔记都存到这里。`
           : "【当前工作目录】未设置。若任务需要读写文件或执行脚本，请提示用户点击侧边栏顶部「打开目录」选择一个本地目录。",
       ];
@@ -887,10 +898,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           /* 持久化失败不影响本会话内生效 */
         }
       }
-      sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
+      if (localToolsEnabled) sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
       // 只注入 Skill 元数据，正文由 Agent 按需 skill_get，避免每轮把整个知识库塞进上下文。
       try {
-        const catalog = skill && skill.list
+        const catalog = localToolsEnabled && skill && skill.list
           ? await skill.list({}, { workspaceRoot: workspaceDir || null })
           : null;
         if (catalog && catalog.ok && Array.isArray(catalog.skills) && catalog.skills.length) {
@@ -976,8 +987,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     }
   }
 
-  async function newChat() {
-    const t = await conversations.createThread(); // 新会话不绑定目录（默认为空，需用户手动「打开目录」）
+  async function newChat(enabled = store?.getLocalToolsEnabled?.() !== false, workspace = null) {
+    const t = await conversations.createThread(undefined, workspace, null, enabled);
+    setLocalToolsEnabled(enabled);
     if (session && session.acquireThread) {
       session.acquireThread([t.id], ownerRef.current); // 认领新线程（预留）→ 别的窗口认领不到，不会串对话
     }
@@ -998,6 +1010,19 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     setActiveTool(null);
     setPendingConfirm(null);
     refreshThreads();
+  }
+
+  async function toggleLocalCapabilities() {
+    if (busy || switchingCapabilities || sendingRef.current || session?.isRunning(currentId)) return;
+    setSwitchingCapabilities(true);
+    try {
+      const enabled = !localToolsEnabled;
+      await newChat(enabled, workspaceDir);
+      store?.setLocalToolsEnabled?.(enabled);
+      setNotice("已新建干净会话并保留工作目录；原会话保存在历史中。" + (enabled ? "本地常规能力已开启。" : "本地常规能力已关闭，使用 MCP 与本地深度工具。"));
+    } catch (e) {
+      setError("切换失败：" + (e?.message || e));
+    } finally { setSwitchingCapabilities(false); }
   }
 
   // 选模式：按会话持久化（一选定整条会话沿用，除非用户再点切换）。在 fresh 线程上选时先 ensureThread 落地线程。
@@ -1037,6 +1062,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       setError(null);
       bindWorkspace(effectiveWorkspace(t));
       setMode((t && t.mode) || null);
+      setLocalToolsEnabled(t?.localToolsEnabled !== false);
       // 切线程：先清掉上一条会话的实时显示，再按**目标线程**是否在后台跑同步 busy——
       // 切到没在跑的会话要清掉旧的"正在跑"界面；切到仍在后台跑的会话则续看。
       resetSteps();
@@ -1135,7 +1161,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         </span>
         <span className="agent-panel__actions">
           <button type="button" onClick={() => setShowHistory(v => !v)} title="历史对话" aria-label="历史对话">{ICONS.history}</button>
-          <button type="button" onClick={newChat} title="新对话" aria-label="新对话">{ICONS.plus}</button>
+          <button type="button" onClick={() => newChat()} title="新对话" aria-label="新对话">{ICONS.plus}</button>
           <button type="button" className="agent-panel__envButton" onClick={onOpenEnvironment} title="环境管理" aria-label="环境管理">
             {ICONS.env}
             <span>环境管理</span>
@@ -1204,6 +1230,16 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
               ? "全自动"
               : "选模式"}
           </span>
+        </button>
+        <button
+          type="button"
+          className={`agent-ws__mode ${localToolsEnabled ? "is-auto" : ""}`}
+          aria-pressed={localToolsEnabled}
+          disabled={busy || switchingCapabilities}
+          onClick={toggleLocalCapabilities}
+          title="切换会新建干净会话并保留工作目录。关闭时隐藏本地普通工具、Skills、历史记忆注入及内置逆向流程；保留 MCP、深度分析和文件执行工具。"
+        >
+          本地常规：{localToolsEnabled ? "开" : "关"}
         </button>
         <span
           className="agent-ws__usage"
@@ -1288,11 +1324,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
                 <div className="agent-mode-pick__title">这个会话怎么跟我配合？</div>
                 <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("auto")}>
                   <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeAuto}</span>全自动</span>
-                  <span className="agent-mode-pick__desc">给我目标接口/参数，我一条龙自主搞定（侦察→定位→验证→补环境→实打），中途不打扰你。</span>
+                  <span className="agent-mode-pick__desc">{localToolsEnabled ? "给我目标接口/参数，我一条龙自主搞定（侦察→定位→验证→补环境→实打），中途不打扰你。" : "按目标自主使用 MCP 与深度工具，完成后报告结果。"}</span>
                 </button>
                 <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("assist")}>
                   <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeAssist}</span>AI辅助</span>
-                  <span className="agent-mode-pick__desc">我先给方案，之后每做完一个阶段（入口定位 / 字节trace / DOM-API trace / 构造实现）就停下汇报、给你方向选项，你来选、逐步推进。</span>
+                  <span className="agent-mode-pick__desc">{localToolsEnabled ? "我先给方案，之后每做完一个阶段（入口定位 / 字节trace / DOM-API trace / 构造实现）就停下汇报、给你方向选项，你来选、逐步推进。" : "按你的指令执行，在需要你决策时汇报并等待。"}</span>
                 </button>
                 <div className="agent-mode-pick__hint">选完仍可随时点顶部模式标切换。</div>
               </div>
@@ -1300,7 +1336,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
             {mode && <>问点什么开始……</>}
             {toolNames.length > 0 && (
               <div className="agent-panel__tools-hint">
-                已接入 {toolNames.length} 个工具：页面 / 网络 / 代码 / 扩展 / 指纹环境 / JSVMP
+                已接入 {localToolsEnabled ? toolNames.length : toolNames.filter(n => localToolVisible(n) || n.startsWith("mcp_")).length} 个工具：{localToolsEnabled ? "页面 / 网络 / 代码 / 扩展 / 指纹环境 / JSVMP" : "MCP / JSVMP / WASM / 本地文件与执行"}
               </div>
             )}
           </div>
@@ -1343,27 +1379,28 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         </div>
       )}
 
-      {pendingConfirm && (
+      {pendingConfirm?.call.mcp?.callback && <McpRequestPanel key={pendingConfirm.call.id} pending={pendingConfirm} />}
+      {pendingConfirm && !pendingConfirm.call.mcp?.callback && (
         <div className="agent-confirm">
           <span className="agent-confirm__msg">
-            Agent 要调用工具 <b>{pendingConfirm.call.name}</b>，允许？
+            等待授权：Agent 要调用工具 <b>{pendingConfirm.call.name}</b>，允许？
           </span>
           <span className="agent-confirm__btns">
-            <button type="button" onClick={() => { pendingConfirm.resolve(true); setPendingConfirm(null); }}>批准</button>
+            <button type="button" onClick={() => { pendingConfirm.resolve(true); setPendingConfirm(null); }}>{pendingConfirm.call.mcp ? "仅允许本次" : "批准"}</button>
             <button type="button" onClick={() => { pendingConfirm.resolve(false); setPendingConfirm(null); }}>拒绝</button>
             <button
               type="button"
-              title="本次及以后都不再询问（关闭确认模式，可在设置里重新开启）"
+              title={pendingConfirm.call.mcp ? "仅在当前 profile 允许此 MCP 工具" : "关闭内置工具确认"}
               onClick={() => {
-                autoApproveRef.current = true; // 本回合后续工具不再询问
-                if (store && store.setConfirmTools) {
-                  store.setConfirmTools(false); // 持久关闭，下次启动也不问
+                if (!pendingConfirm.call.mcp) {
+                  autoApproveRef.current = true;
+                  store?.setConfirmTools?.(false);
                 }
-                pendingConfirm.resolve(true, true); // all=true → 引擎本轮后续工具自动批准
+                pendingConfirm.resolve(true, true);
                 setPendingConfirm(null);
               }}
             >
-              总是允许
+              {pendingConfirm.call.mcp ? "始终允许此工具" : "总是允许"}
             </button>
           </span>
         </div>

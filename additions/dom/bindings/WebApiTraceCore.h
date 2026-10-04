@@ -5,7 +5,7 @@
  * 取不到匿名 native 的名字，故必须 codegen 注入)。RAII 析构在函数返回时(args.rval() 已设)触发，
  * 记录 interface.member(args)→return 到 per-pid NDJSON。**C++ 引擎层、JS 不可检测**。
  * 覆盖 generic(经 trampoline 调生成体)+ specialized(XHR 等直接 JSNative)。
- * 运行期开关 = /tmp/firefox-reverse-webapi.ctl(首字节 1/0 + 可选第二行 filter)。无站点信息。
+ * 运行期开关 = /tmp/browser-agent-webapi.ctl(首字节 1/0 + 可选第二行 filter)。无站点信息。
  *
  * 本头被 BindingUtils.h #include → 所有生成的 binding 都能用 AutoTrace*。
  */

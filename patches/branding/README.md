@@ -1,10 +1,10 @@
-# branding — 用 firefox-reverse 自有 logo 替换浏览器 app 图标
+# branding — 用 browser-agent 自有 logo 替换浏览器 app 图标
 
 把浏览器在 Dock / 访达 / 程序坞 / Cmd-Tab、新标签页、关于页里的名称和图标，从上游 unofficial / Nightly branding 换成 Firefox Reverse。
 
 ## 组成
 
-1. **`0001-use-firefox-reverse-app-icon.patch`** — 改 `browser/app/macbuild/Contents/Info.plist.in`，
+1. **`0001-use-browser-agent-app-icon.patch`** — 改 `browser/app/macbuild/Contents/Info.plist.in`，
    删掉 `CFBundleIconName`/`AppIcon` 两行。
 2. **`additions/browser/branding/unofficial/`** — 由仓库根目录 `logo.png` 生成的图标资源（rsync 覆盖上游同名文件）：
    - `firefox.icns`（app/dock 图标，含 16→1024 全尺寸）

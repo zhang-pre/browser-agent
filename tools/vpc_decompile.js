@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ===========================================================================
- * vpc_decompile.js —— 轨迹驱动符号反编译：把 firefox-reverse 抓到的「执行序列」
+ * vpc_decompile.js —— 轨迹驱动符号反编译：把 browser-agent 抓到的「执行序列」
  *   (vpc l[pc] 序列) + handler 语义 + 字节码操作数 → 符号栈执行 → 伪代码。
  *
  * 通用、数据驱动：op 效果按 inferred_name(通用 JSVMP op 名) 映射；子分发 handler

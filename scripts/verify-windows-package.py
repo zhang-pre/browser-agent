@@ -93,7 +93,7 @@ def validate(report, output):
     assert re.fullmatch(r"[0-9a-f]{40}", commit)
     assert re.fullmatch(r"[0-9]{14}", build_id)
     assert re.fullmatch(r"[0-9a-f]{64}", package_sha)
-    package = Path("candidate") / f"firefox-reverse-{tag}-windows-x86_64.zip"
+    package = Path("candidate") / f"browser-agent-{tag}-windows-x86_64.zip"
     assert sha(package) == package_sha
     report.update(platform="Windows", source_commit=commit, package_sha256=package_sha)
     with temporary_workspace() as work:
@@ -188,7 +188,7 @@ def validate(report, output):
                       let rejected=false;try{ledgerScopeSql('site OR 1=1');}catch{rejected=true;}
                       if(!rejected)throw new Error('allowlist failed');
                       await db.close();
-                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.firefox-reverse.version'),checks:['roundtrip','dedup','scope','cap','allowlist']};
+                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.browser-agent.version'),checks:['roundtrip','dedup','scope','cap','allowlist']};
                     })().then(done,e=>done({error:String(e)}));
                     """, "args": [], "newSandbox": False, "scriptTimeout": 60000,
                 })

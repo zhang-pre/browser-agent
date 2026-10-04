@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Apply Firefox-Reverse environment fingerprint config patches to firefox upstream.
+Apply browser-agent environment fingerprint config patches to firefox upstream.
 Idempotent: re-running is safe.
 
 Usage: python3 apply-fingerprint-config.py <firefox-src-root>

@@ -6,7 +6,7 @@
 
 从浏览器内核观测、网络请求定位到 Node.js / Python 独立实现，项目将分析、验证和交付串成一条可持续执行的工作流；同时提供按 profile 与进程隔离的浏览器环境管理能力。
 
-[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#68-项内置工具) · [源码构建](#源码构建)
+[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#68-项内置工具) · [源码构建](#源码构建) · [第三方 MCP 接入](docs/mcp-client.md)
 
 </div>
 

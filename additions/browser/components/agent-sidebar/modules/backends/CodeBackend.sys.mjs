@@ -1,7 +1,8 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* CodeBackend.sys.mjs — 搜索：在已落盘的 JS 语料 **+ 当前工作目录** 里搜字符串/正则。
  *
  * 纯 IOUtils 读 + JS 匹配（不依赖外部 ripgrep）。
- * 两个来源：① 语料 = ScriptsBackend 落盘的 <profile>/firefox-reverse-agent/js（scripts_capture_all/scripts_save 不带 toWorkspace）；
+ * 两个来源：① 语料 = ScriptsBackend 落盘的 <profile>/browser-agent-agent/js（scripts_capture_all/scripts_save 不带 toWorkspace）；
  *          ② 工作目录 = scripts_save(toWorkspace) 落的 scripts/、自己写的 work/、wasm/ 等——**关键修复**：
  *             以前 code_search 只搜语料，工作目录文件搜不到，逼模型反复退化成 run_node grep（实战转录多次踩到）。
  *             现在两边都搜；工作目录命中的 file 字段给**工作目录相对路径**，可原样 fs_read。
@@ -19,7 +20,7 @@ export class CodeBackend {
   }
 
   async corpusDir() {
-    const dir = PathUtils.join(PathUtils.profileDir, "firefox-reverse-agent", "js");
+    const dir = PathUtils.join(dataDirectory(PathUtils.profileDir, "browser-agent-agent"), "js");
     await IOUtils.makeDirectory(dir, { ignoreExisting: true });
     return dir;
   }

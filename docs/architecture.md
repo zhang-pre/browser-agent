@@ -7,7 +7,7 @@
 3. **新增文件放 additions/** —— 不修改原 firefox 文件、纯新增的 C++/JS/配置文件单独放，避免补丁体积过大。
 4. **配置与代码分离** —— 运行时可调参数（指纹、代理）走 `settings/*.json`，编译期不固化。
 5. **C++ 优先 + JS 兜底** —— 能在 SpiderMonkey/Gecko C++ 层做的不放 JS，确保对反检测脚本不可见。
-6. **用户自编不依赖 build 仓库** —— `firefox-reverse-build/` 是私有的 CI 基础设施。用户想自己编只需要本仓库 + Mozilla 官方依赖。Release 还会发 patched-source tarball 让用户跳过 bootstrap 直接 `./mach build`。
+6. **用户自编不依赖 build 仓库** —— `browser-agent-build/` 是私有的 CI 基础设施。用户想自己编只需要本仓库 + Mozilla 官方依赖。Release 还会发 patched-source tarball 让用户跳过 bootstrap 直接 `./mach build`。
 
 ## 构建流程
 
@@ -61,7 +61,7 @@
 
 ## 与 camoufox-reverse 的差异
 
-| 维度 | camoufox-reverse | firefox-reverse |
+| 维度 | camoufox-reverse | browser-agent |
 |------|------------------|-----------------|
 | 上游 | daijro/camoufox | mozilla-firefox/firefox |
 | 范围 | PropertyTracer 为主 | 指纹/代理/JSVMP/网络/Cookie/JS/属性 全栈 |
@@ -69,7 +69,7 @@
 
 ## 数据输出
 
-所有 trace 输出统一使用 NDJSON（每行一个 JSON 对象），方便流式处理与离线分析。输出目录由 `settings/*.json` 中的 `trace_dir` 决定，默认 `$HOME/.firefox-reverse/traces/`。
+所有 trace 输出统一使用 NDJSON（每行一个 JSON 对象），方便流式处理与离线分析。输出目录由 `settings/*.json` 中的 `trace_dir` 决定，默认 `$HOME/.browser-agent/traces/`。
 
 详细文档见：
 - [features.md](features.md) — 功能清单

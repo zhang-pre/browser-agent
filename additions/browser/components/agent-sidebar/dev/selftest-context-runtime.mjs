@@ -1,4 +1,5 @@
 import { runAgentTurn } from "../modules/runtime/AgentLoop.sys.mjs";
+import { ToolRouter } from "../modules/tools/ToolRouter.sys.mjs";
 
 let pass = 0;
 let fail = 0;
@@ -37,17 +38,9 @@ const client = {
     };
   },
 };
-const router = {
-  maxChars: 20000,
-  listSpecs() {
-    return [
-      { type: "function", function: { name: "zeta", parameters: { type: "object" } } },
-      { type: "function", function: { name: "alpha", parameters: { type: "object" } } },
-    ];
-  },
-  needsConfirm() { return false; },
-  async dispatch() { return { ok: true, data: "A".repeat(30000) + "TAIL" }; },
-};
+const router = new ToolRouter();
+router.register({ name: "zeta", parameters: { type: "object" }, handler: async () => null });
+router.register({ name: "alpha", parameters: { type: "object" }, handler: async () => "A".repeat(30000) + "TAIL" });
 const usages = [];
 const artifacts = [];
 const result = await runAgentTurn({
@@ -74,7 +67,8 @@ ok(!requests[0].messages[0].content.includes("workspace"), "dynamic context is n
 ok(requests[0].messages.find(m => m.role === "user")?.content.includes("workspace=/tmp/example"), "dynamic context is attached to current user task");
 ok(requests[0].opts.tools.map(t => t.function.name).join(",") === "alpha,zeta", "tool specs use deterministic ordering");
 ok(requests.every(r => r.opts.cacheKey === "thread:model:v1"), "all main requests share one cache key");
-ok(artifacts.length === 1 && artifacts[0].content.endsWith("TAIL\"}"), "large tool result is persisted before folding");
+ok(artifacts.length === 1 && JSON.parse(artifacts[0].content).data === "A".repeat(30000) + "TAIL", "real router persists the complete large result before folding");
+ok(router.maxChars === 20000, "AgentLoop does not mutate the shared router threshold");
 const folded = requests[1].messages.find(m => m.role === "tool")?.content || "";
 ok(folded.includes(".frx-context/tool-results/a.json") && folded.includes("TAIL"), "model context keeps artifact path and result tail");
 ok(folded.length < 13000, "folded tool output is bounded");

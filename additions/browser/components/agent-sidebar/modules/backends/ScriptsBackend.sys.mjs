@@ -1,7 +1,8 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* ScriptsBackend.sys.mjs — 存JS：抓页面脚本源码落盘到语料目录（= 搜索的语料）。
  *
  * list(): 用 PageBackend 在页面里枚举脚本 URL（document.scripts + resource timing）。
- * save(): parent 特权 fetch（绕过 CORS）拿源码 → IOUtils 写到 <profile>/firefox-reverse-agent/js/。
+ * save(): parent 特权 fetch（绕过 CORS）拿源码 → IOUtils 写到 <profile>/browser-agent-agent/js/。
  */
 
 // parent/system-ESM 无 window，AbortSignal.timeout 不可用；从 Timer.sys.mjs 取 setTimeout。
@@ -44,7 +45,7 @@ export class ScriptsBackend {
   }
 
   async corpusDir() {
-    const dir = PathUtils.join(PathUtils.profileDir, "firefox-reverse-agent", "js");
+    const dir = PathUtils.join(dataDirectory(PathUtils.profileDir, "browser-agent-agent"), "js");
     await IOUtils.makeDirectory(dir, { ignoreExisting: true });
     return dir;
   }
@@ -62,15 +63,14 @@ export class ScriptsBackend {
 
   /** 短名 → 完整 URL。Agent 常从 initiatorStack/scripts_list 拿到的是短名(如 index.Dy4x2G-f.js)，
    *  直接 fetch 短名会 "is not a valid URL"。这里按 basename 在**页面已加载脚本**里匹配回完整 URL。 */
-  async _resolveUrl(url) {
+  async _resolveUrl(url, ctx) {
     if (/^(https?|data|blob|file|chrome|resource|moz-extension):/i.test(url)) {
       return url; // 已是完整 URL/可 fetch 的协议
     }
     const base = String(url).split(/[\\/]/).pop();
     let urls = [];
     try {
-      const r = await this.list(); // 页面已加载脚本(含 performance 资源里的动态 import chunk)
-      urls = Array.isArray(r?.urls) ? r.urls : [];
+      urls = await this._loadedUrls(ctx);
     } catch {
       /* 页面取不到就走下面的报错 */
     }
@@ -96,18 +96,41 @@ export class ScriptsBackend {
     );
   }
 
-  /** 枚举当前页面加载的脚本 URL。 */
-  async list() {
+  /** 枚举顶层页面的外部脚本 URL；不等同于调试器的运行时源码目录。 */
+  async _loadedUrls(ctx) {
     if (!this.page) {
       throw new Error("ScriptsBackend 需要 page backend");
     }
     const r = await this.page.eval({
       expression:
-        "Array.from(new Set(Array.from(document.scripts).map(s=>s.src).filter(Boolean)" +
-        ".concat(performance.getEntriesByType('resource').filter(e=>e.initiatorType==='script'||/\\.js(\\?|$)/.test(e.name)).map(e=>e.name))))",
-    });
-    const urls = Array.isArray(r?.value) ? r.value : [];
-    return { ok: true, count: urls.length, urls };
+        "JSON.stringify(Array.from(new Set(Array.from(document.scripts).map(s=>s.src).filter(Boolean)" +
+        ".concat(performance.getEntriesByType('resource').filter(e=>e.initiatorType==='script'||/\\.js(\\?|$)/.test(e.name)).map(e=>e.name)))))",
+    }, ctx);
+    // 数组直接返回会被 AgentEvalChild.safeSerialize 截到 200 项；用字符串通道保留清单。
+    if (r?.ok === false || r?.hardCapped || r?.totalLength > r?.returnedLength) {
+      throw new Error("脚本 URL 清单读取失败或被截断，不能作为完整清单使用");
+    }
+    const urls = JSON.parse(r?.value);
+    if (!Array.isArray(urls) || urls.some(url => typeof url !== "string")) {
+      throw new Error("脚本 URL 清单格式无效");
+    }
+    return urls;
+  }
+
+  async list({ urlPattern, offset = 0, limit = 100 } = {}, ctx) {
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new Error("offset 必须是非负整数，limit 必须是 1–1000 的整数");
+    }
+    let urls = await this._loadedUrls(ctx);
+    if (urlPattern) {
+      const pattern = String(urlPattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+      const re = new RegExp(pattern);
+      urls = urls.filter(url => re.test(url));
+    }
+    const total = urls.length;
+    urls = urls.slice(offset, offset + limit);
+    const nextOffset = offset + urls.length < total ? offset + urls.length : null;
+    return { ok: true, count: urls.length, total, offset, nextOffset, urls };
   }
 
   /**
@@ -120,7 +143,7 @@ export class ScriptsBackend {
     if (!url) {
       throw new Error("url required");
     }
-    url = await this._resolveUrl(url); // 短名 → 完整 URL（避免 "is not a valid URL"）
+    url = await this._resolveUrl(url, ctx); // 短名 → 完整 URL（避免 "is not a valid URL"）
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 8000); // 单个 8s 超时
     let resp;
@@ -243,8 +266,11 @@ export class ScriptsBackend {
   }
 
   /** 抓当前页面所有外部脚本到语料目录（并发，避免大站 191 脚本串行超时）。 */
-  async captureAll({ concurrency = 12 } = {}) {
-    const { urls } = await this.list();
+  async captureAll({ concurrency = 12 } = {}, ctx) {
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
+      throw new Error("concurrency 必须是 1–32 的整数");
+    }
+    const urls = await this._loadedUrls(ctx);
     const saved = [];
     const failed = [];
     let idx = 0;
@@ -252,8 +278,12 @@ export class ScriptsBackend {
       while (idx < urls.length) {
         const u = urls[idx++];
         try {
-          const r = await this.save({ url: u });
-          saved.push({ url: u, path: r.path, bytes: r.bytes });
+          const r = await this.save({ url: u }, ctx);
+          if (r?.ok === true) {
+            saved.push({ url: u, path: r.path, bytes: r.bytes });
+          } else {
+            failed.push({ url: u, error: r?.error || "脚本保存失败", ...(r?.httpStatus != null ? { httpStatus: r.httpStatus } : {}) });
+          }
         } catch (e) {
           failed.push({ url: u, error: String((e && e.message) || e) });
         }
@@ -263,12 +293,13 @@ export class ScriptsBackend {
       Array.from({ length: Math.min(concurrency, urls.length || 1) }, worker)
     );
     return {
-      ok: true,
+      ok: failed.length === 0,
+      partial: saved.length > 0 && failed.length > 0,
       total: urls.length,
       savedCount: saved.length,
       failedCount: failed.length,
-      saved: saved.slice(0, 60),
-      failed: failed.slice(0, 20),
+      saved,
+      failed,
     };
   }
 }

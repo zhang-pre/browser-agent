@@ -432,3 +432,113 @@ assert.equal(budgetCtx.journal.compaction.tokensAfter,
   messagesTokens(budgetView) + estimateTokens(budgetToolSpecs));
 budgetCtx.requestMessages(budgetView);
 console.log("OK trigger and committed token counts use the same full-request budget");
+
+const invalidStatusHandoff = JSON.parse(handoffJson("state"));
+invalidStatusHandoff.hypotheses = [{ text: "needs checking", status: "pending", evidenceIds: [] }];
+let statusAttempts = 0;
+const statusRetry = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    statusAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    assert.match(request[0].content, /verified、unverified、rejected、superseded/);
+    if (statusAttempts === 1) return { content: JSON.stringify(invalidStatusHandoff), finishReason: "stop" };
+    assert.match(request[1].content, /invalid memory status/);
+    assert.match(request[1].content, /不得为通过校验升级事实状态/);
+    const corrected = structuredClone(invalidStatusHandoff);
+    corrected.hypotheses[0].status = "unverified";
+    return { content: JSON.stringify(corrected), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+await statusRetry.forceCompact(1, statusRetry.initialMessages);
+assert.equal(statusAttempts, 2);
+assert.equal(statusRetry.journal.compaction.handoff.memories[0].status, "unverified");
+
+const invalidStatusOnly = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat() { return { content: JSON.stringify(invalidStatusHandoff), finishReason: "stop" }; } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+const invalidStatusEvents = structuredClone(invalidStatusOnly.journal.events);
+await assert.rejects(invalidStatusOnly.forceCompact(1, invalidStatusOnly.initialMessages), /invalid memory status/);
+assert.equal(invalidStatusOnly.journal.compaction, null);
+assert.deepEqual(invalidStatusOnly.journal.events, invalidStatusEvents);
+console.log("OK invalid status receives budgeted repair feedback without weakening validation or losing history");
+
+const unsupportedHandoff = JSON.parse(handoffJson("next: check result"));
+unsupportedHandoff.decisions = [{ text: "try a different approach", status: "verified", evidenceIds: [] }];
+let evidenceAttempts = 0;
+const evidenceRetry = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    evidenceAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    assert.match(request[0].content, /所有数组中 status=verified/);
+    if (evidenceAttempts === 1) return { content: JSON.stringify(unsupportedHandoff), finishReason: "stop" };
+    assert.match(request[1].content, /decisions\[0\]: verified memory requires evidence/);
+    assert.ok(request[1].content.includes(JSON.stringify(unsupportedHandoff)));
+    const repaired = structuredClone(unsupportedHandoff);
+    repaired.decisions[0].status = "unverified";
+    return { content: JSON.stringify(repaired), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+await evidenceRetry.forceCompact(1, evidenceRetry.initialMessages);
+assert.equal(evidenceAttempts, 2);
+assert.equal(evidenceRetry.journal.compaction.handoff.memories[0].status, "unverified");
+
+let oversizedRepairAttempts = 0;
+const oversizedDraft = { ...unsupportedHandoff, summary: "x".repeat(50000) };
+const failedEvidence = await createUnifiedTurnContext({
+  messages: prior,
+  client: { async chat(request, opts) {
+    oversizedRepairAttempts++;
+    assert.ok(messagesTokens(request) + opts.maxTokens + 1024 <= 8192);
+    if (oversizedRepairAttempts === 2) {
+      assert.match(request[1].content, /decisions\[0\]: verified memory requires evidence/);
+      assert.ok(!request[1].content.includes(oversizedDraft.summary));
+    }
+    return { content: JSON.stringify(oversizedDraft), finishReason: "stop" };
+  } },
+  contextWindowTokens: 8192, reserveOutputTokens: 1024,
+});
+const evidenceEventsBefore = structuredClone(failedEvidence.journal.events);
+await assert.rejects(failedEvidence.forceCompact(1, failedEvidence.initialMessages), /verified memory requires evidence/);
+assert.equal(oversizedRepairAttempts, 2);
+assert.equal(failedEvidence.journal.compaction, null);
+assert.deepEqual(failedEvidence.journal.events, evidenceEventsBefore);
+console.log("OK evidence repair includes draft when it fits, bounds retries, and preserves history on failure");
+
+// Large windows should summarize in one or two serial calls, retaining budget checks.
+for (const windowTokens of [64000, 272000, 1000000]) {
+  for (const [historyRatio, expectedCalls] of [[0.55, 1], [0.9, 2]]) {
+    let calls = 0;
+    let active = false;
+    const source = [{ role: "user", content: "batch scaling task" },
+      ...Array.from({ length: 80 }, (_, i) => ({
+        role: "assistant", content: `record ${i}: ` + "x".repeat(Math.floor(windowTokens * historyRatio * 3 / 80)),
+      }))];
+    const scaled = await createUnifiedTurnContext({
+      contextWindowTokens: windowTokens,
+      messages: source,
+      client: { async chat(request, opts) {
+        assert.equal(active, false, "summary batches must stay serial");
+        active = true;
+        calls++;
+        if (calls > 1) assert.ok(request[1].content.includes(`scaled summary ${calls - 1}`),
+          "next batch must include the previous summary");
+        assert.ok(messagesTokens(request) + opts.maxTokens + Math.max(1024, Math.floor(windowTokens * 0.04)) <= windowTokens,
+          "summary request must leave its safety reserve");
+        await Promise.resolve();
+        active = false;
+        return { content: handoffJson(`scaled summary ${calls}`), finishReason: "stop" };
+      } },
+    });
+    const view = await scaled.forceCompact(1, scaled.initialMessages);
+    assert.equal(calls, expectedCalls, `${windowTokens} window with ${historyRatio} history`);
+    assert.equal(scaled.journal.events.length, source.length, "compaction must preserve raw history");
+    scaled.requestMessages(view);
+  }
+}
+console.log("OK proportional batches finish in one or two serial calls across working windows");

@@ -134,7 +134,9 @@ export async function createUnifiedTurnContext({
     let detail = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       signal?.throwIfAborted();
-      const maxTokens = Math.min(room, attempt ? retryOutput : firstOutput);
+      const attemptRoom = windowTokens - messagesTokens(request) - summarySafety;
+      const maxTokens = Math.min(attemptRoom, attempt ? retryOutput : firstOutput);
+      if (maxTokens <= 0) throw new Error(phase + " request exceeds model context budget");
       const res = await client.chat(request, {
         signal, maxTokens, cacheKey: cacheKey ? cacheKey + ":unified-" + phase : "",
       });
@@ -154,6 +156,20 @@ export async function createUnifiedTurnContext({
         ", reasoningChars=" + String(res?.reasoningContent || "").length +
         ", maxTokens=" + maxTokens + (validation ? ", validation=" + validation : "");
       emit({ type: "context_summary_retry", phase, attempt: attempt + 1, detail });
+      if (!attempt) {
+        const feedback = validation
+          ? `上次摘要未通过结构校验：${validation}。`
+          : "上次摘要为空或输出被截断。";
+        request[1] = { role: "user", content: content + "\n\n" + feedback +
+          "请根据以上原始输入重新生成完整 JSON，严格遵守结构契约；保持简洁，不得为通过校验升级事实状态或编造证据。" };
+        if (validation) {
+          const repair = { role: "user", content: request[1].content +
+            "\n\n上次未通过校验的摘要（仅供修正，不是证据）：\n" + text };
+          if (messagesTokens([request[0], repair]) + firstOutput + summarySafety <= windowTokens) {
+            request[1] = repair;
+          }
+        }
+      }
     }
     const error = new Error("上下文压缩失败：模型连续两次未返回符合结构契约的完整摘要；原始记录和旧摘要已保留。" +
       " (" + phase + ": " + detail + ")");
@@ -165,19 +181,27 @@ export async function createUnifiedTurnContext({
     const task = taskCardText(state, plan.cutoffId - 1);
     const summaryOutput = Math.min(4096, Math.max(512, Math.floor(windowTokens * 0.16)));
     const summaryInput = windowTokens - retryOutput - summarySafety;
-    const maxSource = Math.max(256, Math.min(32000,
+    // Scale source batches with the working window so ordinary histories need
+    // one or two sequential summaries. Keep room for prompts, output and retries.
+    const maxSource = Math.max(256, Math.min(Math.floor(windowTokens * 0.7),
       summaryInput - estimateTokens(SUMMARY_PROMPT) - estimateTokens(task) - summaryOutput - 512));
-    const chunks = sourceChunks(plan.evicted, maxSource);
-    let handoff = null;
+    let remaining = plan.evicted;
+    let handoff = state.compaction?.handoff || null;
     let summary = plan.previousSummary;
-    for (const chunk of chunks) {
-      const content = `任务卡（只读）：\n${task}\n\n上一版累计状态：\n${summary || "（无）"}\n\n本次新增日志：\n${eventSource(chunk)}`;
+    while (remaining.length) {
+      const prior = (handoff ? JSON.stringify(handoff) : summary) || "（无）";
+      const budget = Math.min(maxSource, summaryInput - estimateTokens(SUMMARY_PROMPT) -
+        estimateTokens(task) - estimateTokens(prior) - 512);
+      if (budget < 256) throw new Error("cumulative evidence exceeds summary budget; shorten the handoff before continuing");
+      const chunk = sourceChunks(remaining, budget)[0];
+      const content = `任务卡（只读）：\n${task}\n\n上一版累计状态：\n${(handoff ? JSON.stringify(handoff) : summary) || "（无）"}\n\n本次新增日志：\n${eventSource(chunk)}`;
       if (estimateTokens(content) + estimateTokens(SUMMARY_PROMPT) > summaryInput) {
         throw new Error("summary request exceeds model context budget");
       }
       const next = await summaryText(content, summaryOutput, "summary", chunk.at(-1).id);
       handoff = mergeHandoffs(handoff, next);
       summary = next.summary;
+      remaining = remaining.slice(chunk.length);
     }
     return handoff;
   }
@@ -219,7 +243,7 @@ export async function createUnifiedTurnContext({
           taskCardVersion: state.taskCard.version, snapshotHead: state.lastId,
           beforeTokens: current,
         };
-        const handoff = await rewriteText(previous.summary, taskCardText(state, previous.coveredThrough), previous.evidenceRefs, previous.coveredThrough);
+        const handoff = mergeHandoffs(previous.handoff, await rewriteText(JSON.stringify(previous.handoff || previous.summary), taskCardText(state, previous.coveredThrough), previous.evidenceRefs, previous.coveredThrough));
         const shorter = handoff.summary;
         const candidate = commitUnifiedRewrite(state, snapshot, shorter, { handoff });
         const after = messagesTokens(build(candidate)) + toolTokens;
@@ -244,7 +268,7 @@ export async function createUnifiedTurnContext({
     let candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
     let after = messagesTokens(build(candidate)) + toolTokens;
     if (after > hardInput) {
-      handoff = mergeHandoffs(handoff, await rewriteText(summary, taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs, candidate.compaction.coveredThrough));
+      handoff = mergeHandoffs(handoff, await rewriteText(JSON.stringify(handoff), taskCardText(candidate, candidate.compaction.coveredThrough), candidate.compaction.evidenceRefs, candidate.compaction.coveredThrough));
       summary = handoff.summary;
       candidate = commitUnifiedCompaction(state, plan, summary, { evidenceRefs: refs, handoff });
       after = messagesTokens(build(candidate)) + toolTokens;

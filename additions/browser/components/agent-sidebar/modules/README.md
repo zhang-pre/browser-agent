@@ -46,7 +46,7 @@
 - 压缩状态与 `unifiedContext.memoryOutbox` 在同一次会话保存中提交；
   SQLite 用事务和 `threadId:version` 回执保证重试不重复。失败保留待同步项并提示，
   下次启动本任务或生成检查点时重试；禁止改写到其他工作目录。
-- 主库：profile 下 `firefox-reverse-agent/memory.sqlite` 的 `memory_v2` 和
+- 主库：profile 下 `browser-agent-agent/memory.sqlite` 的 `memory_v2` 和
   `memory_batches`；工作目录的 `ledger.md` 为可读镜像。
   旧 `mem` 表保留，历史事实迁移为未验证观察，历史失败路径也标为未验证。
   本次升级不会从旧 Markdown 摘要回填“已验证”记忆。

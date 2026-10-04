@@ -28,6 +28,11 @@ SELFTESTS=(
   selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
   selftest-typography.mjs
+  selftest-mcp-extensions.mjs
+  selftest-mcp-client.mjs
+  selftest-mcp-manager.mjs
+  selftest-mcp-process.mjs
+  selftest-mcp-runtime.mjs
   selftest-mozbuild.mjs
   selftest-providers.mjs
   selftest-subscription.mjs
@@ -56,9 +61,11 @@ SELFTESTS=(
 )
 
 for test_file in "${SELFTESTS[@]}"; do
-  run node "$SIDEBAR_DIR/dev/$test_file"
+  # Preserve excluded dev fixtures while checking the renamed product contract.
+  run node --import "$REPO_ROOT/scripts/tests/register-product-name.mjs" "$SIDEBAR_DIR/dev/$test_file"
 done
 
+run node "$REPO_ROOT/scripts/tests/product-rename.mjs"
 run node "$REPO_ROOT/scripts/check-branding-assets.mjs"
 
 echo

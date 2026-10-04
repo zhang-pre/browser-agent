@@ -15,7 +15,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 SOURCE = REPOSITORY / "additions"
 UPSTREAM = Path(os.environ.get("FRX_UPSTREAM_DIR", REPOSITORY / "upstream"))
 CONFIG = SOURCE / "dom/base/FrxFingerprintConfig.cpp"
-assert "/.firefox-reverse/environments/.current-process/fingerprint.json" not in CONFIG.read_text()
+assert "/.browser-agent/environments/.current-process/fingerprint.json" not in CONFIG.read_text()
 
 STUBS = {
     "nsString.h": r'''#pragma once

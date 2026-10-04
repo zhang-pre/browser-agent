@@ -100,5 +100,12 @@ await assert.rejects(ledger.mergeHandoff(handoff, ctx, { threadId: "mirror", sou
 globalThis.IOUtils.writeUTF8 = writeMirror;
 assert.equal((await ledger.mergeHandoff(handoff, ctx, { threadId: "mirror", source: "completion", version: 5 })).alreadyApplied, true);
 console.log("OK ledger mirror failure remains visible and its retry does not duplicate SQLite records");
+await ledger.append({ kind: "fact", text: "scope assertion", status: "verified", evidence: "experiment A" }, ctx);
+await ledger.append({ kind: "fact", text: "scope assertion", conditions: "another environment", status: "verified", evidence: "experiment B" }, ctx);
+await ledger.append({ kind: "fact", text: "scope assertion", status: "superseded", evidence: "correction C" }, ctx);
+const correctedRows = await ledger.recall({ query: "scope assertion", status: "verified" }, ctx);
+assert.equal(correctedRows.count, 1);
+assert.equal(correctedRows.results[0].conditions, "another environment");
+console.log("OK retired claims cannot reappear as verified from older ledger rows");
 await ledger.close();
 console.log("OK bound SQL and workspace isolation");

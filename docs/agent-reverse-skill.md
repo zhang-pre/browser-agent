@@ -1,6 +1,6 @@
 # Agent 逆向 Skill（方法论 · 草案 v0.1）
 
-> firefox-reverse 内置 Agent 的**逆向方法论**。站点无关、通用。
+> browser-agent 内置 Agent 的**逆向方法论**。站点无关、通用。
 > 结构参照 `hello_js_reverse_skill` 裁剪，但只用 Agent 自己的工具，并把「何时换路线（反绕圈）」作为一等内容。
 > 用途：① 蒸馏进系统提示；② 将来作为 Agent 开工时加载的资源；③ harness 护栏（何时拦、拦了往哪推）的依据。
 > ⚠ 这是**草案**，先定结构与方向，再决定怎么落地 + harness 那几条硬护栏。

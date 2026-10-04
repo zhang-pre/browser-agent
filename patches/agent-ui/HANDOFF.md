@@ -49,17 +49,17 @@
 - 32 核 / 61G 内存 / 76G 可用磁盘（偏紧）
 - **rust 1.95 已装**（`~/.cargo`，jsvmp 编 firefox-vanilla 时装的，**够编 Firefox 153，不用动**）、clang14/python3.10/node22/git 齐全、`bootstrap.done` 在
 - **同机有 jsvmp 的 `~/firefox-vanilla`（已编译）+ `~/camoufox-reverse`** → 别和它们同时 `mach build`，会抢 CPU/内存/磁盘
-- 服务器上**还没有 `~/firefox-reverse`** → 需 git clone 或从本地 rsync
+- 服务器上**还没有 `~/browser-agent`** → 需 git clone 或从本地 rsync
 
 编译步骤：
-1. 同步 firefox-reverse 到服务器（git clone 私有仓 或 `rsync` 本地）
+1. 同步 browser-agent 到服务器（git clone 私有仓 或 `rsync` 本地）
 2. `cd additions/browser/components/agent-sidebar && npm install && npm run build` 生成 bundle（**bundle 是 gitignore 的，服务器上必须重新 build**）
 3. `./scripts/bootstrap.sh`（clone upstream，几个 G）
 4. `./scripts/apply-patches.sh`（apply 0001 patch + rsync 组件，已验证可跑通）
 5. `cd upstream && source ~/.cargo/env && ./mach build`（依赖齐，**可跳过 `./mach bootstrap`**）
 6. 产物在 `upstream/obj-*/dist/`，拉回本地装，验证里程碑：**侧栏出现 Agent 图标 → 填 DeepSeek Key → 对话拿到回复**
 
-建议：照顶层 `scripts/deploy-and-test.sh`（camoufox 专用）的模式，为 firefox-reverse 写一个 `scripts/deploy-build.sh` 封装上述流程。
+建议：照顶层 `scripts/deploy-and-test.sh`（camoufox 专用）的模式，为 browser-agent 写一个 `scripts/deploy-build.sh` 封装上述流程。
 
 ## 4. 接手必读的坑
 
@@ -67,7 +67,7 @@
 2. **Firefox 153 sidebar 架构**：是 `SidebarController` 对象（在 `browser-sidebar.js` 里），**不是**独立的 SidebarController.sys.mjs；面板注册照 `generateSidebarsMap()` 里内置的 `viewGenaiChatSidebar` 模式。
 3. **`sys.mjs` 全局 `fetch` 可用性未实测**：`LlmClient` 假设 chrome 特权 ESM 有 `globalThis.fetch`，编译跑起来后需确认；若不可用，由宿主（panel document）注入。
 4. **资源 URL**：模块 = `resource:///modules/agentsidebar/<name>.sys.mjs`，content = `chrome://browser/content/agent-sidebar/<file>`。bundle 里已硬编码这些，改了要重新 `npm run build`。
-5. **A4 接 jsvmp trace 时**：真实落盘路径是 `/tmp/firefox-reverse-jsvmp-b.ndjson.<pid>`（可被 `MOZ_JSVMP_TRACE_FILE` 覆盖），**不是**方案文档写的 `~/.firefox-reverse/traces/jsvmp/`；`sid` 是指针地址、进程重启即变，缓存键用 `(file,col)`。
+5. **A4 接 jsvmp trace 时**：真实落盘路径是 `/tmp/browser-agent-jsvmp-b.ndjson.<pid>`（可被 `MOZ_JSVMP_TRACE_FILE` 覆盖），**不是**方案文档写的 `~/.browser-agent/traces/jsvmp/`；`sid` 是指针地址、进程重启即变，缓存键用 `(file,col)`。
 
 ## 5. 后续 Track（A1 之后，见 docs/agent-sidebar.md 第 4 / 8 节）
 
@@ -75,4 +75,4 @@
 - A3：`ToolRouter.sys.mjs` + 页面操作 tools（用户确认机制）
 - A4：`TraceBridge.sys.mjs` + jsvmp.* tools（第 8 节已设计 7 个 tool，用 Subprocess 调 tools/dispatcher_split.js 等）
 - A5：配置热更新 tools
-- A6：拆独立子仓 `firefox-reverse-agent-ui/`
+- A6：拆独立子仓 `browser-agent-agent-ui/`

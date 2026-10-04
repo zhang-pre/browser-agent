@@ -1,6 +1,6 @@
 # tests/
 
-集成测试（按模块）。每个 patch 模块在此有对应子目录，运行已编译的 firefox-reverse 二进制 + 模拟站点，验证 trace 输出符合预期。
+集成测试（按模块）。每个 patch 模块在此有对应子目录，运行已编译的 browser-agent 二进制 + 模拟站点，验证 trace 输出符合预期。
 
 ```
 tests/

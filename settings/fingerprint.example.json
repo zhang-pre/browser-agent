@@ -1,5 +1,5 @@
 {
-  "_comment": "Example fingerprint config. Environment files live under ~/.firefox-reverse/environments/<envId>/fingerprint.json.",
+  "_comment": "Example fingerprint config. Environment files live under ~/.browser-agent/environments/<envId>/fingerprint.json.",
   "schemaVersion": 1,
   "enabled": true,
   "seed_mode": "persistent",
@@ -11,11 +11,11 @@
   },
   "trace": {
     "enabled": true,
-    "dir": "~/.firefox-reverse/traces",
-    "jsvmp_dir": "~/.firefox-reverse/traces/jsvmp",
-    "network_dir": "~/.firefox-reverse/traces/network",
-    "property_dir": "~/.firefox-reverse/traces/property",
-    "js_dir": "~/.firefox-reverse/traces/js"
+    "dir": "~/.browser-agent/traces",
+    "jsvmp_dir": "~/.browser-agent/traces/jsvmp",
+    "network_dir": "~/.browser-agent/traces/network",
+    "property_dir": "~/.browser-agent/traces/property",
+    "js_dir": "~/.browser-agent/traces/js"
   },
   "navigator": {
     "userAgent": {

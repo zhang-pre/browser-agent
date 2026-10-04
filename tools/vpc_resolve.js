@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /* ===========================================================================
- * vpc_resolve.js —— 从 firefox-reverse vpc_trace(虚拟寄存器快照) 还原执行控制流，
+ * vpc_resolve.js —— 从 browser-agent vpc_trace(虚拟寄存器快照) 还原执行控制流，
  *                   补全静态反汇编里解不出的跳转目标。通用、数据驱动，不写死任何槽号/站点。
  *
  * 输入: vpc.ndjson —— 每行 {"_vpc":{"l":[...locals...],"a":[...args...]}}
- *       (firefox-reverse MOZ_JSVMP_VPC_TRACE=1 在派发循环头每条虚拟指令记一行)
+ *       (browser-agent MOZ_JSVMP_VPC_TRACE=1 在派发循环头每条虚拟指令记一行)
  *
  * 做法:
  *  1. 给每个寄存器槽打分，自动找出「虚拟 pc」槽(取值多、95%+ 是小正增量、范围有界)。

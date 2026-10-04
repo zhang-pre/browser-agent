@@ -55,16 +55,15 @@ export function getBackends() {
 
   const find = {
     /** 定位某加密/签名参数的入口：它出现在哪些请求 + 它的字面量在哪些已存 JS 里。 */
-    async paramEntry({ param, urlPattern } = {}) {
+    async paramEntry({ param, urlPattern } = {}, ctx) {
       if (!param) {
         throw new Error("param required（要定位的参数名，如 sign / token / 加密签名参数）");
       }
       const out = { ok: true, param, requests: [], codeHits: [] };
       try {
         // 紧凑化：有的站点单条 URL 可达 1-2KB，截短 + 限 12 条，避免结果被 ToolRouter 截断。
-        out.requests = net
-          .list({ urlPattern: urlPattern || "*" + param + "*", limit: 12 })
-          .requests.map(r => ({
+        const result = await net.list({ urlPattern: urlPattern || "*" + param + "*", limit: 12 }, ctx);
+        out.requests = result.requests.map(r => ({
             id: r.id,
             method: r.method,
             status: r.status,
@@ -74,7 +73,7 @@ export function getBackends() {
         out.netError = String((e && e.message) || e);
       }
       try {
-        out.codeHits = (await code.search({ query: param, maxResults: 30 })).hits;
+        out.codeHits = (await code.search({ query: param, maxResults: 30 }, ctx)).hits;
       } catch (e) {
         out.codeError = String((e && e.message) || e);
       }

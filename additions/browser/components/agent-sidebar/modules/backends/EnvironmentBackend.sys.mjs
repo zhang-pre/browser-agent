@@ -1,10 +1,11 @@
+import { dataDirectory } from "../state/BrandCompatibility.sys.mjs";
 /* EnvironmentBackend.sys.mjs
  *
  * Environment-level browser isolation:
  *   one environment = one profile directory + one Firefox process.
  *
  * Data lives outside any Firefox profile, under:
- *   ~/.firefox-reverse/environments
+ *   ~/.browser-agent/environments
  *
  * This module creates the environment file protocol, stable profile prefs, and
  * launch surface consumed by the C++/Gecko fingerprint layer.
@@ -502,7 +503,7 @@ export class EnvironmentBackend {
     if (!home) {
       return "";
     }
-    return PathUtils.join(home, ".firefox-reverse", DEFAULT_DIR_NAME);
+    return PathUtils.join(dataDirectory(home, ".browser-agent"), DEFAULT_DIR_NAME);
   }
 
   _currentEnvId() {

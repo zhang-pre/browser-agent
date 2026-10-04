@@ -1,7 +1,7 @@
 {
-  "_comment": "Example environment manager defaults. Runtime environment data lives outside profiles under ~/.firefox-reverse/environments.",
+  "_comment": "Example environment manager defaults. Runtime environment data lives outside profiles under ~/.browser-agent/environments.",
   "schemaVersion": 1,
-  "root": "~/.firefox-reverse/environments",
+  "root": "~/.browser-agent/environments",
   "port": {
     "base": 2828,
     "scan": 200

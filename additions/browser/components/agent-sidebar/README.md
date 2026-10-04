@@ -2,6 +2,16 @@
 
 Agent 侧边栏的 **UI + LLM 调用源码层**。配合 [`patches/agent-ui/`](../../../../patches/agent-ui/README.md) 把它挂载进 Firefox chrome。方案见 [`docs/agent-sidebar.md`](../../../../docs/agent-sidebar.md)。
 
+## 本地常规能力开关
+
+对话页工作目录旁的「本地常规：开 / 关」控制该会话的工具与提示词配置。默认开启，保留原有行为；切换后的选择也作为后续新会话的默认值。历史会话保留自己的配置。
+
+关闭时，普通浏览器操作通过已配置的 MCP 服务完成，服务器 instructions 与工具照常注入。本地只保留 JSVMP、WASM、Web-API 引擎观测、闭包读取、白盒差分、离线分析，以及文件读写、Node/Python 和 npm 支持工具。不暴露普通页面/网络/脚本/环境/扩展/Cookie 工具、Skill 工具与目录、remember/recall，不注入原系统方法论、P0–P6 阶段门或历史账本。自动续跑和错误提示也不再引导回原有逆向路线。原工具与 Skill 文件仍保留，开启即可使用。
+
+切换会创建干净会话并保留工作目录，旧会话仍在历史中，避免旧 Skill 正文、摘要和工具记录继续影响模型。运行中不可切换。本地引擎工具观察 Firefox，不会自动观察 MCP 服务管理的 Chrome；执行前需确认分析目标。
+
+回归验证：`node dev/selftest-local-capabilities.mjs`。
+
 ## 目录
 
 | 目录 | 内容 | 打包 |

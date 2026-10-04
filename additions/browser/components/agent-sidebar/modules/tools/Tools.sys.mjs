@@ -32,6 +32,7 @@ const T = (name, description, parameters, need, call) => ({
 /** 改动型工具：执行前需用户批准（A3 要求；只读类如 *_list/*_get/code_search/jsvmp_query 不需要）。 */
 const CONFIRM_TOOLS = new Set([
   "addons_manage",
+  "deep_run",
   "page_eval",
   "page_navigate",
   "page_click",
@@ -59,6 +60,28 @@ const CONFIRM_TOOLS = new Set([
 /** 全部内置工具的声明表（声明 ≠ 注册；注册由 backend 在场决定）。 */
 function toolTable() {
   return [
+    T("deep_health",
+      "原生观测健康检查：在 start 后实际触发目标，再检查当前 Firefox PID 是否产生本次新增记录。captured=true 后才继续深入；连续两次无新增记录应停止相应 trace，记录限制并回到 MCP 主路线。配置成功和旧 trace 文件不算证据。",
+      { type: "object", properties: { engine: { type: "string", enum: ["jsvmp", "webapi"] } }, required: ["engine"] },
+      b => typeof b.jsvmp?.health === "function" && typeof b.webapi?.health === "function",
+      (b, a, ctx) => {
+        if (!["jsvmp", "webapi"].includes(a.engine)) throw new Error("engine 必须为 jsvmp 或 webapi");
+        return b[a.engine].health(a, ctx);
+      }),
+    T("deep_target",
+      "确认原生深度分析的当前 Firefox 目标，返回 targetId、documentId、PID、URL 和 ready。不属于 MCP 浏览器；导航后再次确认。",
+      { type: "object", properties: {} }, b => typeof b.page?.deepTarget === "function",
+      (b, a, ctx) => b.page.deepTarget(a, ctx)),
+    T("deep_run",
+      "仅用于 Firefox 原生深度分析的运行入口。navigate 打开目标 URL；reload 刷新；evaluate 在目标页面执行 expression（可触发函数或点击）。先用 deep_target 取得 targetId；reload/evaluate 还需当前 documentId。导航/刷新只返回已发起，随后确认 ready 和 PID；进程变化需重新开启 trace，文档级观测需重新安装。先准备目标，再开启观测，再触发、查询、停止。磁盘源码需显式执行并添加 sourceURL 与 trace 的 scriptUrl 匹配；不会自动修改分支或注入密钥。",
+      { type: "object", properties: {
+        action: { type: "string", enum: ["navigate", "reload", "evaluate"] },
+        targetId: { type: "string" }, documentId: { type: "string" },
+        url: { type: "string" }, expression: { type: "string" },
+        awaitPromise: { type: "boolean", default: true }, saveTo: { type: "string" },
+      }, required: ["action", "targetId"] }, b => typeof b.page?.deepRun === "function",
+      (b, a, ctx) => b.page.deepRun(a, ctx)),
+
     // ───────── Firefox 扩展（backend: addons；AMO + AddonManager）─────────
     T(
       "addons_query",
@@ -216,13 +239,13 @@ function toolTable() {
     // ───────── ① 网络捕获控制（backend: net） ─────────
     T(
       "net_capture",
-      "开启/关闭/查询网络请求捕获（HTTP/WS/fetch/XHR）。start 后会**同时捕获请求发起者 JS 调用栈**（仅 XHR/Fetch/Beacon/WS），net_get 里看 initiatorStack——这是定位「谁生成了签名参数」的黄金路径。**先 start 再触发请求**（栈只在请求发起那一刻能抓到）。",
+      "开启/关闭/查询/清空 HTTP 请求证据（URL、方法、请求/响应头、状态；不采集 body 或 WebSocket 消息帧）。start 同时启用发起者 JS 栈采集，net_get 查看 initiatorStack；须先 start 再触发。clear 只清捕获记录和关联栈，保持捕获开关，不清 cookie/storage。采集按 URL 过滤，不限于当前 tab。",
       {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["start", "stop", "status"] },
+          action: { type: "string", enum: ["start", "stop", "status", "clear"] },
           urlPattern: { type: "string", description: "fnmatch 过滤，省略捕获全部" },
-          captureBody: { type: "boolean" },
+          captureBody: { type: "boolean", description: "兼容旧参数；暂不支持 body，true 会返回明确错误，请省略" },
         },
         required: ["action"],
       },
@@ -231,13 +254,14 @@ function toolTable() {
     ),
     T(
       "net_list",
-      "列出已捕获的请求摘要。",
+      "列出已捕获的请求摘要，默认最近 100 条，页内按时间正序。hasMore=true 时传 nextBeforeId 为 beforeId 继续读取更早记录；新请求不会挤乱游标，旧记录仍可能被容量上限淘汰。",
       {
         type: "object",
         properties: {
           urlPattern: { type: "string" },
           method: { type: "string" },
-          limit: { type: "integer" },
+          limit: { type: "integer", minimum: 1, maximum: 1000, description: "每页条数，默认 100" },
+          beforeId: { type: "integer", minimum: 1, description: "取 ID 小于此值的更早记录，使用上页 nextBeforeId" },
         },
       },
       b => b.net && b.net.list,
@@ -245,13 +269,13 @@ function toolTable() {
     ),
     T(
       "net_get",
-      "取单条请求的完整信息（含**请求头 reqHeaders**[含 X-S/签名头]、响应头、body、initiator 调用栈）。`requestId` = `net_list` 返回的那条记录的 `id`（原样传 id 即可，两个名都认）。",
+      "取单条已捕获的请求信息（URL、方法、请求头 reqHeaders、响应头、状态、initiatorStack；不含请求/响应 body）。requestId 或 id 使用 net_list 返回的 id。大结果由运行层先保存再折叠，按返回路径用 fs_read 分段读取。",
       {
         type: "object",
         properties: {
           requestId: { type: "string", description: "= net_list 返回的 id（把那个数字原样传进来）" },
           id: { type: "integer", description: "requestId 的别名（直接传 net_list 的 id 字段也行）" },
-          includeBody: { type: "boolean" },
+          includeBody: { type: "boolean", description: "兼容旧参数；未采集 body，true 会返回明确错误，请省略" },
         },
       },
       b => b.net && b.net.get,
@@ -261,17 +285,21 @@ function toolTable() {
     // ───────── ② 保存 JS 文件（backend: scripts） ─────────
     T(
       "scripts_list",
-      "列出页面已解析的脚本（含 eval/Function/inline/worker）。",
+      "枚举当前顶层页面 document.scripts 与 Resource Timing 中的外部脚本 URL，不保证覆盖 inline/eval/Function/worker，不读取运行时源码。按 nextOffset 分页；导航或资源变化后重新枚举。",
       {
         type: "object",
-        properties: { urlPattern: { type: "string" } },
+        properties: {
+          urlPattern: { type: "string", description: "URL 通配过滤，支持 * 和 ?" },
+          offset: { type: "integer", minimum: 0, description: "默认 0；继续读取时用 nextOffset" },
+          limit: { type: "integer", minimum: 1, maximum: 1000, description: "每页条数，默认 100" },
+        },
       },
       b => b.scripts && b.scripts.list,
       (b, a, ctx) => b.scripts.list(a, ctx)
     ),
     T(
       "scripts_save",
-      "把指定脚本源码落盘。默认落语料目录（供 code_search / 离线分析）；" +
+      "重新下载指定脚本 URL 并落盘（不是读取浏览器当时执行的源码，内容可能已变化）。默认落语料目录（供 code_search / 离线分析）；" +
         "**toWorkspace:true → 落到 <工作目录>/scripts/，立即可 run_node 执行**（定位到 signer 脚本后用这个，省去手动拷贝，直接进 node 补环境）。" +
         "⚠ 之后引用该文件**一律原样复制返回里的 `workspaceRelative` 路径**（已是短 basename），别凭记忆手敲长文件名——敲漏会「文件不存在」。",
       {
@@ -638,7 +666,7 @@ function toolTable() {
     ),
     T(
       "scripts_capture_all",
-      "把当前页面所有外部脚本源码落盘到语料目录（供 code_search / find_param_entry）。",
+      "重新下载当前顶层页面可枚举的外部脚本到语料目录（供 code_search / find_param_entry）。返回逐项成功/失败；partial=true 表示部分成功，不保证等同于当时执行的源码。",
       { type: "object", properties: {} },
       b => b.scripts && b.scripts.captureAll,
       (b, a, ctx) => b.scripts.captureAll(a, ctx)
@@ -767,7 +795,7 @@ function toolTable() {
     // ───────── ⑧ Skills（内置逆向方法论 + 用户/工作区通用 Skill） ─────────
     T(
       "skill_list",
-      "列出当前可用 Skills。来源包括浏览器内置、~/.firefox-reverse/skills，以及工作目录下 .agents/skills 和 .firefox-reverse/skills。" +
+      "列出当前可用 Skills。来源包括浏览器内置、~/.browser-agent/skills，以及工作目录下 .agents/skills 和 .browser-agent/skills。" +
         "只返回名称/描述；用户指定某 Skill 时先查列表，再用 skill_get 按名读取正文。",
       { type: "object", properties: {} },
       b => b.skill && b.skill.list,
@@ -957,7 +985,7 @@ function toolTable() {
     ),
     T(
       "env_list",
-      "列出 firefox-reverse 环境。环境是独立 profile + 独立 Firefox 进程；root 默认 ~/.firefox-reverse/environments。",
+      "列出 browser-agent 环境。环境是独立 profile + 独立 Firefox 进程；root 默认 ~/.browser-agent/environments。",
       {
         type: "object",
         properties: {
@@ -1176,6 +1204,8 @@ function toolTable() {
  * @returns {Array<{name,description,parameters,handler}>}
  */
 export function createBuiltinTools(backends = {}) {
+  const firefoxTool = name => /^(deep_|page_|net_|scripts_|env_|addons_|webapi_)/.test(name) ||
+    ["cookies", "hook_inject", "find_param_entry", "signer_trace", "closure_read", "jsvmp_trace", "jsvmp_query", "jsvmp_status", "whitebox_diff"].includes(name);
   return toolTable()
     .filter(t => {
       try {
@@ -1186,7 +1216,7 @@ export function createBuiltinTools(backends = {}) {
     })
     .map(t => ({
       name: t.name,
-      description: t.description,
+      description: (firefoxTool(t.name) ? "[内置 Firefox 工具；不操作 MCP 的 Chrome 页面或网络队列] " : "") + t.description,
       parameters: t.parameters,
       needsConfirm: CONFIRM_TOOLS.has(t.name),
       handler: (args, ctx) => t._call(backends, args, ctx),

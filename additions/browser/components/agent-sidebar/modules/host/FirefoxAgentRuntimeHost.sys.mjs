@@ -8,6 +8,7 @@
 import { ToolRouter } from "../tools/ToolRouter.sys.mjs";
 import { createBuiltinTools } from "../tools/Tools.sys.mjs";
 import { getBackends } from "../backends/Backends.sys.mjs";
+import { initializeMcp } from "./FirefoxMcpService.sys.mjs";
 
 const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
 let sharedRouter = null;
@@ -16,6 +17,7 @@ function router() {
   if (!sharedRouter) {
     sharedRouter = new ToolRouter();
     sharedRouter.registerAll(createBuiltinTools(getBackends()));
+    initializeMcp(sharedRouter);
   }
   return sharedRouter;
 }

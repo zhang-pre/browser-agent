@@ -1,4 +1,4 @@
-# Firefox-Reverse · 自动编译 + 发布到 Releases
+# browser-agent · 自动编译 + 发布到 Releases
 #
 # 触发：仅手动 workflow_dispatch。正式多端包先在 SSH 编译机验证，再决定是否运行本工作流；
 # 普通打 tag 不再自动创建一个与手工 Release 重复的草稿。
@@ -48,9 +48,9 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           draft: true
           prerelease: ${{ contains(steps.meta.outputs.tag, '-') }}
-          name: "Firefox-Reverse ${{ steps.meta.outputs.tag }}"
+          name: "browser-agent ${{ steps.meta.outputs.tag }}"
           body: |
-            Firefox-Reverse ${{ steps.meta.outputs.tag }} —— 内置 AI 逆向 Agent 的 Firefox。
+            browser-agent ${{ steps.meta.outputs.tag }} —— 内置 AI 逆向 Agent 的 Firefox。
             按系统下载安装包，使用说明见 README。
 
   # ── 2. 自托管 runner：增量构建 macOS arm64 / Intel DMG → 传 Release ──
@@ -74,7 +74,7 @@ jobs:
             objdir: obj-x86_64-apple-darwin
             file_marker: x86_64
     env:
-      UPSTREAM: /home/ubuntu/firefox-reverse/upstream
+      UPSTREAM: /home/ubuntu/browser-agent/upstream
     steps:
       - name: Checkout 补丁集
         uses: actions/checkout@v4
@@ -129,7 +129,7 @@ jobs:
           test -n "$executable"
           file "$executable" | grep -F '${{ matrix.file_marker }}'
           source_dmg=$(ls "$obj"/dist/firefox-*.mac.dmg | head -1)
-          output="$GITHUB_WORKSPACE/firefox-reverse-${{ needs.create-release.outputs.tag }}-macos-${{ matrix.asset_arch }}.dmg"
+          output="$GITHUB_WORKSPACE/browser-agent-${{ needs.create-release.outputs.tag }}-macos-${{ matrix.asset_arch }}.dmg"
           cp "$source_dmg" "$output"
           echo "path=$output" >> "$GITHUB_OUTPUT"
           echo "dmg: $output"
@@ -168,7 +168,7 @@ jobs:
       GECKO_REMOTE: "https://github.com/mozilla-firefox/firefox.git"
     steps:
       - uses: actions/checkout@v4
-        with: { path: firefox-reverse }
+        with: { path: browser-agent }
       - name: 取 Firefox 源码
         shell: bash
         run: |
@@ -183,13 +183,13 @@ jobs:
         run: |
           set -e
           for module in agent-ui branding; do
-            for patch in firefox-reverse/patches/$module/*.patch; do
+            for patch in browser-agent/patches/$module/*.patch; do
               git -C upstream apply --index "$GITHUB_WORKSPACE/$patch"
             done
           done
-          cp -R firefox-reverse/additions/. upstream/
-          python firefox-reverse/scripts/apply-fingerprint-config.py upstream
-          node firefox-reverse/scripts/check-branding-assets.mjs upstream
+          cp -R browser-agent/additions/. upstream/
+          python browser-agent/scripts/apply-fingerprint-config.py upstream
+          node browser-agent/scripts/check-branding-assets.mjs upstream
       - name: bootstrap + build + package
         shell: bash
         working-directory: upstream

@@ -192,7 +192,7 @@ bool OpenOutputFileIfNeeded() {
   const char* basePath = getenv("MOZ_JSVMP_TRACE_FILE");
   char baseBuf[1024];
   if (!basePath || !basePath[0]) {
-    snprintf(baseBuf, sizeof(baseBuf), "%s/firefox-reverse-jsvmp-b.ndjson", FrxTraceDir());
+    snprintf(baseBuf, sizeof(baseBuf), "%s/browser-agent-jsvmp-b.ndjson", FrxTraceDir());
     basePath = baseBuf;
   }
   char fullPath[1024];
@@ -233,7 +233,7 @@ void MaybeApplyDumpConfig() {
   const char* dEnv = getenv("MOZ_JSVMP_DUMP_CTL");
   char dBaseBuf[1024];
   if (!(dEnv && dEnv[0])) {
-    snprintf(dBaseBuf, sizeof(dBaseBuf), "%s/firefox-reverse-jsvmp.dump", FrxTraceDir());
+    snprintf(dBaseBuf, sizeof(dBaseBuf), "%s/browser-agent-jsvmp.dump", FrxTraceDir());
   }
   const char* dBase = (dEnv && dEnv[0]) ? dEnv : dBaseBuf;
   char path[1088];
@@ -321,7 +321,7 @@ void MaybePollControlFile() {
     strncpy(ctlBuf, ctlEnv, sizeof(ctlBuf) - 1);
     ctlBuf[sizeof(ctlBuf) - 1] = '\0';
   } else {
-    snprintf(ctlBuf, sizeof(ctlBuf), "%s/firefox-reverse-jsvmp.ctl.%d", FrxTraceDir(), FrxPid());
+    snprintf(ctlBuf, sizeof(ctlBuf), "%s/browser-agent-jsvmp.ctl.%d", FrxTraceDir(), FrxPid());
   }
   const char* ctlPath = ctlBuf;
   FILE* cf = fopen(ctlPath, "rb");
@@ -398,7 +398,7 @@ void MaybePollControlFile() {
     const char* clrEnv = getenv("MOZ_JSVMP_TRACE_CLEAR");
     char clrBaseBuf[1024];
     if (!(clrEnv && clrEnv[0])) {
-      snprintf(clrBaseBuf, sizeof(clrBaseBuf), "%s/firefox-reverse-jsvmp.clear", FrxTraceDir());
+      snprintf(clrBaseBuf, sizeof(clrBaseBuf), "%s/browser-agent-jsvmp.clear", FrxTraceDir());
     }
     const char* clrBase = (clrEnv && clrEnv[0]) ? clrEnv : clrBaseBuf;
     char clrPath[1088];
@@ -455,7 +455,7 @@ void EnsureInit() {
   const char* basePath = getenv("MOZ_JSVMP_TRACE_FILE");
   char baseBuf[1024];
   if (!basePath || !basePath[0]) {
-    snprintf(baseBuf, sizeof(baseBuf), "%s/firefox-reverse-jsvmp-b.ndjson", FrxTraceDir());
+    snprintf(baseBuf, sizeof(baseBuf), "%s/browser-agent-jsvmp-b.ndjson", FrxTraceDir());
     basePath = baseBuf;
   }
 

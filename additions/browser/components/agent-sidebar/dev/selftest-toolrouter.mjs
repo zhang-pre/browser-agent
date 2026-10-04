@@ -56,7 +56,8 @@ r2.register({ name: "boom", handler: async () => { throw new Error("kaboom"); } 
 r2.register({ name: "big", handler: async () => "x".repeat(500) });
 ok((await r2.dispatch("boom", {})).error === "kaboom", "handler 抛错 → 兜成 ok:false error");
 const bigEnv = await r2.dispatch("big", {});
-ok(bigEnv.ok && bigEnv.data._truncated && bigEnv.meta.truncated, "超大结果 → 截断标记");
+ok(bigEnv.ok && bigEnv.data === "x".repeat(500) && bigEnv.meta.oversized && !bigEnv.meta.truncated,
+  "超大结果 → 保留完整正文，运行层落盘后折叠（直接调用也不丢正文）");
 
 console.log("[3] AgentLoop tool_use 闭环（mock LLM）");
 let sawTools = false;

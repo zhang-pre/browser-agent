@@ -12,7 +12,7 @@ FRX_PORT_WAIT_SEC = "90"
 FRX_AUTOLAUNCH = "0"
 FRX_FIREFOX_BIN = "/home/zbb/projects/browser-agent/upstream/obj-x86_64-pc-linux-gnu/dist/bin/firefox"
 FRX_JSX_PROMPT_SRC = "/home/zbb/projects/browser-agent/additions/browser/components/agent-sidebar/content/AgentPanel.jsx"
-FRX_WORKSPACE_ROOT = "/home/zbb/projects/firefox-reverse-ws"
+FRX_WORKSPACE_ROOT = "/home/zbb/projects/browser-agent-ws"
 FRX_DATA_DIR = "/home/zbb/projects/browser-agent-mcp/data"
 
 [mcp_servers.frx-director.tools.frx_status]

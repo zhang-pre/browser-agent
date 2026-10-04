@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import ChatGptLogin from "./ChatGptLogin.jsx";
+import McpSettings from "./McpSettings.jsx";
 import { applySidebarFontScale, normalizeFontScale } from "../modules/providers/SidebarTypography.sys.mjs";
 
 function legacyProfile(store, providers) {
@@ -18,7 +19,7 @@ function legacyProfile(store, providers) {
 }
 
 /** 模型配置管理：同一 provider 可保存多组账号/端点，选择历史配置即可切换。 */
-export default function SettingsPane({ store, providers, fetchModels, subscriptionAuth, onClose }) {
+export default function SettingsPane({ store, providers, fetchModels, subscriptionAuth, mcp, onClose }) {
   const initialProfiles = store.listModelProfiles
     ? store.listModelProfiles()
     : [legacyProfile(store, providers)];
@@ -364,6 +365,8 @@ export default function SettingsPane({ store, providers, fetchModels, subscripti
         <button type="button" onClick={save}>保存并使用</button>
         {status && <span className="settings-pane__saved">{status}</span>}
       </div>
+
+      {mcp && <McpSettings mcp={mcp} />}
 
       <p className="settings-pane__note">
         每条配置独立保存渠道、账号、模型和思考等级。API Key 与旧版本一致，明文保存在本机浏览器 prefs；ChatGPT 订阅凭据使用 Firefox 加密登录存储。凭据不会随会话导出。

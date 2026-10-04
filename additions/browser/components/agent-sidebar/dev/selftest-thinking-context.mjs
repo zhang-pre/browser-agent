@@ -26,7 +26,7 @@ const result = await runAgentTurn({
       strict(messages); // Validate before protocol compatibility can mask a regression.
       requests.push(structuredClone(messages));
       n++;
-      if (n === 1) return { content: "plan", reasoningContent: "text reasoning", toolCalls: [] };
+      if (n === 1) return { content: "plan", reasoningContent: "text reasoning", toolCalls: [], finishReason: "length" };
       if (n === 2) return { content: "", reasoningContent: reasoning, toolCalls: [call("a"), call("b")] };
       return { content: "## 结论：完成", reasoningContent: "final reasoning", toolCalls: [] };
     },

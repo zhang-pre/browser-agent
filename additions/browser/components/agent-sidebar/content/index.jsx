@@ -12,7 +12,7 @@ import { applySidebarFontScale } from "../modules/providers/SidebarTypography.sy
  * 见 patches/agent-ui/README.md。 */
 function loadModules() {
   if (typeof ChromeUtils === "undefined") {
-    throw new Error("ChromeUtils 不可用：agent-sidebar 须在 firefox-reverse 浏览器内运行");
+    throw new Error("ChromeUtils 不可用：agent-sidebar 须在 browser-agent 浏览器内运行");
   }
   const { configStore } = ChromeUtils.importESModule(
     "resource:///modules/agentsidebar/providers/ConfigStore.sys.mjs"
@@ -27,11 +27,11 @@ function loadModules() {
   const { getBackends } = ChromeUtils.importESModule(
     "resource:///modules/agentsidebar/backends/Backends.sys.mjs"
   );
-  const { ToolRouter } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/tools/ToolRouter.sys.mjs"
+  const { firefoxAgentRuntimeHost } = ChromeUtils.importESModule(
+    "resource:///modules/agentsidebar/host/FirefoxAgentRuntimeHost.sys.mjs"
   );
-  const { createBuiltinTools } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/tools/Tools.sys.mjs"
+  const { mcpService } = ChromeUtils.importESModule(
+    "resource:///modules/agentsidebar/host/FirefoxMcpService.sys.mjs"
   );
   const { runAgentTurn } = ChromeUtils.importESModule(
     "resource:///modules/agentsidebar/runtime/AgentLoop.sys.mjs"
@@ -44,9 +44,9 @@ function loadModules() {
     "resource:///modules/agentsidebar/host/FirefoxSubscriptionAuth.sys.mjs"
   );
   const backends = getBackends();
-  const router = new ToolRouter();
-  router.registerAll(createBuiltinTools(backends));
+  const router = firefoxAgentRuntimeHost.router();
   return {
+    mcp: mcpService,
     store: configStore,
     providers: listProviders(),
     conversations: conversationStore,
@@ -98,6 +98,7 @@ function App({ mods }) {
           providers={mods.providers}
           fetchModels={mods.fetchModels}
           subscriptionAuth={mods.subscriptionAuth}
+          mcp={mods.mcp}
           onClose={() => setView("chat")}
         />
       )}

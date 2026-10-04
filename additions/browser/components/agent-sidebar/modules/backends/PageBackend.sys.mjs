@@ -299,6 +299,56 @@ function activeBrowser(ctx) {
 }
 
 export class PageBackend {
+  /** Minimal runtime bridge for native engine analysis, independent of the ordinary tool surface. */
+  async deepTarget(_args, ctx) {
+    const browser = activeBrowser(ctx);
+    const bc = browser.browsingContext;
+    const wgp = bc?.currentWindowGlobal;
+    return {
+      ok: true, browser: "Firefox", targetId: String(bc?.id || ""),
+      documentId: String(wgp?.innerWindowId || ""), pid: wgp?.osPid || null,
+      url: browser.currentURI?.spec || "", title: browser.contentTitle || "",
+      ready: !!wgp && !browser.webProgress?.isLoadingDocument,
+    };
+  }
+
+  async deepRun({ action, targetId, documentId, url, expression, awaitPromise = true, saveTo } = {}, ctx) {
+    const before = await this.deepTarget({}, ctx);
+    if (!targetId || before.targetId !== String(targetId)) {
+      throw new Error("Firefox 目标已变化或缺少 targetId；先用 deep_target 确认当前目标。");
+    }
+    if (!["navigate", "reload", "evaluate"].includes(action)) {
+      throw new Error("action 必须是 navigate / reload / evaluate");
+    }
+    if (action !== "navigate" && (!before.ready || !documentId || before.documentId !== String(documentId))) {
+      throw new Error("Firefox 文档未就绪或已变化；先用 deep_target 重新确认 documentId 和 PID。");
+    }
+    // There must be no await between this check and dispatch to the selected browser.
+    const browser = activeBrowser(ctx);
+    if (String(browser.browsingContext?.id || "") !== before.targetId ||
+        String(browser.browsingContext?.currentWindowGlobal?.innerWindowId || "") !== before.documentId) {
+      throw new Error("Firefox 目标在执行前发生变化；请重新确认。");
+    }
+    if (action === "evaluate") {
+      const result = await this.eval({ expression, awaitPromise, saveTo }, ctx);
+      const after = await this.deepTarget({}, ctx);
+      return { ...result, target: before, currentTarget: after,
+        targetChanged: before.targetId !== after.targetId || before.documentId !== after.documentId };
+    }
+    if (action === "navigate") {
+      if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+        throw new Error("navigate 需要完整的 http/https URL。");
+      }
+      await this.navigate({ url }, ctx);
+    } else {
+      browser.reload();
+    }
+    return {
+      ok: true, dispatched: true, ready: false, target: before,
+      note: "仅已发起加载。用 deep_target 确认新文档就绪、URL 和 PID；PID 改变需重新开启原生 trace 后再触发。文档级观测需重新安装。此次加载不保证已被捕获。",
+    };
+  }
+
   /** 在当前标签页内容上下文执行表达式。
    *  默认返回 { ok, value, type, totalLength, returnedLength }（带完整性元信息，治"被截了却不自知"）；
    *  传 saveTo 则把**完整字符串结果**落盘到工作目录该相对路径、只回 { ok, saved, savedPath, length, preview }

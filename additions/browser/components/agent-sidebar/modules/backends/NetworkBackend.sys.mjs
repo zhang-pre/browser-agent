@@ -32,6 +32,7 @@ export class NetworkBackend {
     this._page = page; // 用于 arm/drain 内容侧发起者栈捕获
     // channelId → 发起者栈，用于"栈先于 http-on-modify-request 到达"的乱序情况暂存（有界）。
     this._pendingStacks = new Map();
+    this._generation = 0;
   }
 
   /** 把内容侧 drain 来的发起者栈按 channelId 合并进请求记录（list/get 前调）。 */
@@ -40,7 +41,9 @@ export class NetworkBackend {
       return;
     }
     try {
+      const generation = this._generation;
       const arr = await this._page.drainNetStack(undefined, ctx);
+      if (generation !== this._generation) return;
       for (const s of arr) {
         this.recordStack(s.channelId, s.stack);
       }
@@ -67,7 +70,10 @@ export class NetworkBackend {
     }
   }
 
-  async capture({ action = "status", urlPattern } = {}, ctx) {
+  async capture({ action = "status", urlPattern, captureBody } = {}, ctx) {
+    if (captureBody === true) {
+      return { ok: false, error: "captureBody 暂不支持：当前仅捕获请求/响应头和发起者调用栈，不采集 body。" };
+    }
     if (action === "start") {
       this._pattern = urlPattern ? globToRe(urlPattern) : null;
       if (!this._on) {
@@ -98,7 +104,7 @@ export class NetworkBackend {
     }
     if (action === "stop") {
       try {
-        this._page && this._page.disarmNetStack && this._page.disarmNetStack(undefined, ctx);
+        await this._page?.disarmNetStack?.(undefined, ctx);
       } catch {}
       if (this._on) {
         try {
@@ -114,9 +120,19 @@ export class NetworkBackend {
       return { ok: true, capturing: false };
     }
     if (action === "clear") {
+      this._generation++;
       this._buf = [];
-      return { ok: true, cleared: true };
+      this._map = new WeakMap();
+      this._pendingStacks.clear();
+      // 丢弃内容侧尚未合并的旧栈；保留捕获开关和单调递增的请求 ID。
+      let stacksCleared = !this._page?.drainNetStack;
+      try {
+        await this._page?.drainNetStack?.(undefined, ctx);
+        stacksCleared = true;
+      } catch {}
+      return { ok: true, cleared: true, capturing: this._on, stacksCleared };
     }
+    if (action !== "status") throw new Error("net_capture: action 必须是 start/stop/status/clear");
     return { ok: true, capturing: this._on, count: this._buf.length };
   }
 
@@ -171,20 +187,33 @@ export class NetworkBackend {
   }
 
   /** 列出摘要（不含 headers）。先 drain 内容侧发起者栈合并进来。 */
-  async list({ urlPattern, method, limit = 100 } = {}, ctx) {
+  async list({ urlPattern, method, limit = 100, beforeId } = {}, ctx) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new Error("limit 必须是 1–1000 的整数");
+    }
+    if (beforeId != null && (!Number.isInteger(beforeId) || beforeId < 1)) {
+      throw new Error("beforeId 必须是正整数（使用上页的 nextBeforeId）");
+    }
     await this._drainStacks(ctx);
     const re = urlPattern ? globToRe(urlPattern) : null;
     let out = this._buf.filter(
       r => (!re || re.test(r.url)) && (!method || r.method === method)
     );
+    const total = out.length;
+    if (beforeId != null) out = out.filter(r => r.id < beforeId);
+    const hasMore = out.length > limit;
     out = out.slice(-limit).map(r => ({ id: r.id, method: r.method, url: r.url, status: r.status, contentType: r.contentType, t: r.t }));
-    return { ok: true, count: out.length, requests: out };
+    return { ok: true, count: out.length, total, requests: out, hasMore,
+      nextBeforeId: hasMore ? out[0].id : null };
   }
 
   /** 取单条完整记录（含 headers + initiatorStack）。先 drain 内容侧发起者栈合并进来。
    *  **id 兼容**：net_list 返回字段是 `id`，模型常按此原样回传 `id`（而 schema 名为 requestId）→ 旧版只认
    *  requestId 时收到 undefined、报 "request not found: undefined"。这里同时接受 requestId / id，治这个反复踩的入参错配。 */
-  async get({ requestId, id } = {}, ctx) {
+  async get({ requestId, id, includeBody } = {}, ctx) {
+    if (includeBody === true) {
+      return { ok: false, error: "includeBody 暂不支持：未采集请求/响应 body；省略该参数可读取头部与调用栈。" };
+    }
     await this._drainStacks(ctx);
     const want = requestId != null ? requestId : id;
     if (want == null) {
