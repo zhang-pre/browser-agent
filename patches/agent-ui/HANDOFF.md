@@ -1,5 +1,7 @@
 # Agent Sidebar 交接清单
 
+> **历史归档（A1 阶段）**：以下是早期交接时的状态，不是当前待办。侧栏、流式协议、工具循环、原生接入和构建注册均已继续演进；旧路径、Track 编号和“仅剩编译”不再适用。当前维护入口见 [侧栏说明](../../docs/agent-sidebar.md)、[Runtime](../../docs/agent-runtime.md) 与 [测试入口](../../tests/README.md)。
+
 > 交接给 jsvmp 线程接手。**现状：A1（最小可用侧栏）代码已全部完成并验证，剩 T6 编译。**
 > 方案见 [`docs/agent-sidebar.md`](../../docs/agent-sidebar.md)，模块说明见 [`additions/browser/components/agent-sidebar/README.md`](../../additions/browser/components/agent-sidebar/README.md)。
 

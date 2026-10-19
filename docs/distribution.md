@@ -1,108 +1,38 @@
-# 发布与可见性策略
+# 构建产物与发布
 
-## 阶段
+发布自动化位于本仓库 [release.yml](../.github/workflows/release.yml)，不要求另取私有 build 仓库。工作流是实现事实；仓库当前可见性和某个 Release 是否已发布不能从源码判断。
 
-| 阶段 | 仓库可见性 | Release 可见性 | 触发条件 |
-|------|-----------|----------------|----------|
-| **private**（当前） | 私有 | 私有 | 默认 |
-| **internal-test** | 私有 | 私有（邀请协作者可下载） | 至少 1 个核心模块跑通 |
-| **public-beta** | 公开 | 公开（标 prerelease） | 6 大模块全部可用 + 多端编译通过 |
-| **public-release** | 公开 | 公开（正式版） | 经过实战站点验证（如目标站点/NMPA 等） |
+## 发布工作流
 
-## 渠道
+仅通过 `workflow_dispatch` 手动触发，输入 `release_tag`（项目版本形如 `v0.24.1`）和可选 `build_all`。推 tag 不自动运行。
 
-主渠道：**本仓库的 GitHub Releases**。
+- `create-release` 创建/更新草稿；tag 含 `-` 时标记 prerelease。
+- `build-mac` 使用自托管 runner，复用固定位置的已准备 Firefox 树。检查锁定基线与 Agent 父级注册，构建 React bundle、同步 additions，分别在 arm64/x86_64 对象目录构建与打包，并验证架构及 DMG 签名。
+- macOS 资产命名为 `browser-agent-<tag>-macos-arm64.dmg` 和 `browser-agent-<tag>-macos-x86_64.dmg`。arm64 的 `mozconfig.mac` 来自预备树，Intel 配置在 `configs/mozconfig.macos-x64`。
+- `build_all=true` 才启用托管 Windows/Linux 从零构建，作业设置 `continue-on-error: true`。上传使用 mach 原始包名；失败不阻止 macOS 作业。
 
-- 单 release 单文件最大 2 GB，Firefox 二进制压缩后 80-200 MB，完全够用。
-- 私有仓库的 Releases 也是私有的——仅协作者可见/下载。
-- Release tag 命名：`v<firefox-upstream-major>.<minor>.<patch>-rN`，例如 `v135.0.0-r1`。
+自托管作业依赖已经打好原生接入的树，并不重新执行所有 Python 接入脚本。可选 Windows/Linux 路径目前也没有 React bundle 构建和 Phase B 接入步骤，不能据该作业存在就认定完整分析能力已经验收。发布前应核对实际包内资源与原生记录。
 
-## 产物清单
+当前工作流不生成 patched-source tarball、`SOURCES.md` 或每个安装包的 SHA256 文件，也不自动把草稿转成正式发布。早期文档中的这些项目属于未实现的发布设想。
 
-每次 release 应包含：
+## 本地构建与打包
 
-```
-# 二进制（多端预编译包）
-browser-agent-<version>-linux-x64.tar.xz
-browser-agent-<version>-linux-x64.tar.xz.sha256
-browser-agent-<version>-macos-arm64.dmg
-browser-agent-<version>-macos-arm64.dmg.sha256
-browser-agent-<version>-macos-x64.dmg
-browser-agent-<version>-macos-x64.dmg.sha256
-browser-agent-<version>-windows-x64.zip
-browser-agent-<version>-windows-x64.zip.sha256
+从仓库源码构建的完整步骤见 [README](../README.md#源码构建)。主要产物位置：
 
-# 源码 tarball（已应用补丁，用户可跳过 bootstrap 直接 ./mach build）
-browser-agent-<version>-source.tar.xz
-browser-agent-<version>-source.tar.xz.sha256
+| 路径/脚本 | 作用 |
+|---|---|
+| `upstream/obj-*/dist/` | mach 构建与打包输出 |
+| `scripts/package.sh` | 调用 `mach package`，复制匹配的 `firefox-*` tar.xz/dmg/zip/exe/deb 到根目录 `dist/`；可用 `DIST_DIR` 覆盖 |
+| `scripts/build-linux-arm64.sh`、`configs/mozconfig.linux-arm64` | 独立 Linux arm64 构建路径，不在 release 工作流矩阵中 |
+| `scripts/repack-zh-cn.sh`、`verify-zh-cn-stage.sh` | 简体中文重打包与 stage 检查 |
+| `scripts/macos-adhoc-sign-apps.sh`、`macos-verify-dmg.sh` | macOS ad-hoc 签名与包检查 |
 
-# 元信息
-SOURCES.md         # 对应的 upstream firefox ref + 本仓库 commit
-CHANGELOG.md       # 本版相对上版的变更
-```
+没有承诺可下载的 patched-source 包；如果实际 Release 只有二进制，使用仓库构建路径。
 
-## 用户自己编译的两条路径
+## 包验证
 
-**为什么不直接把上游 firefox 源码 vendor 进 browser-agent？**
-源码 ~5 GB（不含历史）/ ~30 GB（含），超过 GitHub 仓库实用上限；上游每天数百 commit，同步成本天文数字；业界（camoufox / Brave / Tor Browser / LibreWolf / Mullvad）都用补丁集模式。
+- `.github/workflows/validate-windows-package.yml` 是独立手动作业，输入候选 Release tag、SHA256、SourceStamp 和 BuildID，用 `scripts/verify-windows-package.py` 在 Windows 启动候选包并检查结果。
+- Linux 包检查使用 `scripts/verify-linux-package.sh`。
+- macOS 使用签名/DMG 验证脚本；签名检查不能替代原生功能测试。
 
-下面两条路径满足"用户想自己编"的需求：
-
-### 路径 A：从仓库 clone
-
-适合想跟踪本仓库更新的开发者。
-
-```bash
-git clone <browser-agent>
-cd browser-agent
-./scripts/bootstrap.sh        # 拉上游 mozilla-firefox/firefox
-./scripts/apply-patches.sh    # 应用我们的补丁
-./scripts/build.sh            # ./mach build 包装
-./scripts/package.sh
-```
-
-依赖按 Mozilla 官方文档装：`./mach bootstrap` 会自动处理大部分。**完全不需要 browser-agent-build 仓库**。
-
-### 路径 B：下载 patched-source tarball
-
-适合一次性编一个固定版本的用户。
-
-```bash
-# 从 Releases 下载 browser-agent-<version>-source.tar.xz
-tar -xf browser-agent-<version>-source.tar.xz
-cd browser-agent-<version>
-./mach bootstrap --no-interactive --application-choice browser
-./mach build
-./mach package
-```
-
-跳过 bootstrap + patch 步骤，直接编。Mozilla 官方对自家源码也是这么发的。
-
-### 平台依赖参考
-
-- Linux：https://firefox-source-docs.mozilla.org/setup/linux_build.html
-- macOS：https://firefox-source-docs.mozilla.org/setup/macos_build.html
-- Windows：https://firefox-source-docs.mozilla.org/setup/windows_build.html
-
-## CI 发布流程（规划）
-
-1. `browser-agent-build/` 的 CI 在 browser-agent 打 tag 时触发。
-2. 矩阵编译四个平台，产物上传到 GitHub Releases drafts。
-3. 本人手工审核 + 发布。
-
-## 私有阶段获取产物
-
-私有阶段没有 public release。本人/协作者获取产物：
-
-- 自己跑 `browser-agent-build/scripts/build-{linux,macos,windows}.sh`
-- 产物在 `browser-agent-build/dist/<platform>/`
-
-## 公开门槛清单
-
-切换 private → public-beta 前需要：
-
-- [ ] 至少在 1 个目标平台编译跑通
-- [ ] 至少 3 个模块产出可用 trace（建议 property-trace / network-analysis / cookie-js-analysis）
-- [ ] License 明确（与 mozilla 上游 MPL-2.0 兼容）
-- [ ] README 去除内部测试相关的临时说明
-- [ ] 仓库内不含敏感字符串（密钥、内网地址）
+不要把 Node 自测通过、某次历史平台验证或上传成功当作新候选包完成验收。测试层次见 [tests/README.md](../tests/README.md)，历史变更保留在 [CHANGELOG](../CHANGELOG.md)。

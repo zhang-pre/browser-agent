@@ -6,7 +6,7 @@
 
 从浏览器内核观测、网络请求定位到 Node.js / Python 独立实现，项目将分析、验证和交付串成一条可持续执行的工作流；同时提供按 profile 与进程隔离的浏览器环境管理能力。
 
-[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#68-项内置工具) · [源码构建](#源码构建) · [第三方 MCP 接入](docs/mcp-client.md)
+[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#内置工具) · [源码构建](#源码构建) · [第三方 MCP 接入](docs/mcp-client.md)
 
 </div>
 
@@ -20,18 +20,18 @@ browser-agent-mcp 将这些环节放进 Firefox 侧边栏中的常驻 Agent。�
 
 项目还包含指纹环境管理器。每个环境绑定自己的 Firefox profile、浏览器进程与 Marionette 端口，Cookie、缓存、站点存储和配置分别持久化；创建、导入、编辑、启动和销毁均可从侧边栏或工具接口完成。
 
-这里的核心差异不是“让 AI 操作网页”，而是让分析探针进入 SpiderMonkey 与 Gecko：签名函数参数、JSVMP 指令轨迹、WASM import 边界以及浏览器与本地复刻之间的分支偏差，都可以在 C++ 层采集。由于不依赖页面脚本中的 monkey patch，普通反射与常见反调试逻辑更难干扰观测结果。
+项目在 SpiderMonkey 解释器和 Gecko WebIDL 边界接入 C++ 探针，同时结合页面调试、脚本注入和本地 Node 分析。JSVMP/WebAPI 原生记录、签名与闭包调试、WASM 探测和分支对照分别使用不同机制；JSVMP 追踪会限制 JIT 并影响时序，不能将所有工具都理解为页面不可感知的内核采集。
 
 ## 能力概览
 
 | 能力域 | 提供的能力 |
 |---|---|
-| 自主任务执行 | 父进程 Agent 可持续调用 68 项工具，侧边栏关闭、重载或切换标签页不会终止任务 |
+| 自主任务执行 | 父进程 Agent 持续执行模型与工具循环，侧边栏关闭或重载不会终止任务；工具目标由会话上下文传递 |
 | 内核级分析 | 覆盖签名入口、闭包值、JSVMP 指令、WASM 边界、WebAPI 使用情况以及执行分支对比 |
 | 双模型协作 | worker 负责高频工具操作，director 负责阶段规划、审阅结论和调整方向 |
 | 环境隔离 | 每个环境独占 profile、进程和 Marionette 端口，并支持指纹配置的生成、导入与维护 |
 | 模型接入 | 支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Claude、OpenAI，以及兼容 OpenAI 或 Anthropic 协议的端点 |
-| 本地状态管理 | 会话、命名模型配置、工作产物、阶段笔记和 SQLite 记忆均在本机保存 |
+| 本地状态管理 | 会话、命名模型配置、工作产物、统一事件日志和 SQLite 类型化记忆均在本机保存 |
 | 扩展与 Skills | 可发现用户或工作区 Skill，并通过 Firefox 原生 AddonManager 管理 AMO 扩展 |
 
 ---
@@ -72,6 +72,8 @@ ChatGPT 订阅登录无需填写 API Key，请参阅 [Pi provider 分析与接�
 
 会话生成的脚本、还原代码、采集结果与分析笔记都会写入该会话绑定的工作目录。
 
+对话页的「本地常规」默认开启；关闭会新建保留工作目录的干净会话，只保留 Firefox 深度分析与文件/执行支持工具，普通操作由已连接 MCP 提供。Firefox 与 MCP 管理的浏览器是不同目标，详见 [侧边栏说明](docs/agent-sidebar.md)。
+
 ---
 
 ## worker / director 协作
@@ -106,12 +108,13 @@ JSVMP 路线提供指令记录、派发器拆分、字节解码和离线反汇�
 
 ---
 
-## 68 项内置工具
+## 内置工具
 
-工具由 <code>Tools.sys.mjs</code> 统一声明，下面的数量与当前注册表一致。
+工具由 [Tools.sys.mjs](additions/browser/components/agent-sidebar/modules/tools/Tools.sys.mjs) 统一声明，当前共 69 项。声明仅在所需后端存在时注册；会话的「本地常规」开关还会筛选模型可见的工具。连接 MCP 后发现的第三方工具另行加入，不计入此表。
 
 | 分类 | 工具接口 | 用途 |
 |---|---|---|
+| 原生目标与健康检查（3） | <code>deep_target deep_run deep_health</code> | 确认 Firefox 目标、文档与 PID，加载或触发目标，并检查本次观测是否产生新增记录 |
 | 页面交互（9） | <code>page_navigate page_click page_scroll page_type page_eval page_screenshot page_elements page_info page_automation_scan</code> | 页面导航、输入点击、脚本执行、截图、元素读取及自动化特征检查 |
 | 网络与入口（5） | <code>net_capture net_list net_get hook_inject find_param_entry</code> | 记录请求、查看详情与调用来源、在 document-start 阶段注入探针并定位动态字段 |
 | 源码处理（4） | <code>code_search scripts_list scripts_save scripts_capture_all</code> | 检索语料或工作目录，枚举、采集并保存页面脚本 |
@@ -125,32 +128,41 @@ JSVMP 路线提供指令记录、派发器拆分、字节解码和离线反汇�
 | 执行与文件（8） | <code>run_node run_python npm_install fs_read fs_write fs_list fs_copy fs_mkdir</code> | 在受控工作目录运行程序、安装依赖并维护产物 |
 | Cookie（1） | <code>cookies</code> | 通过原生 Cookie 管理器读写数据，包括 httpOnly 项 |
 | Firefox 扩展（2） | <code>addons_query addons_manage</code> | 查询 AMO、查看安装状态并执行安装、启停、卸载或打开设置页 |
-| Skills 与记忆（7） | <code>skill_list skill_get skill_read_resource notes_add notes_get remember recall</code> | 发现和读取 Skill、记录阶段信息并维护跨会话知识 |
+| Skills 与记忆（5） | <code>skill_list skill_get skill_read_resource remember recall</code> | 发现和读取 Skill，按工作目录保存、检索带状态和证据的类型化记忆 |
 | 指纹环境（18） | <code>env_current env_current_process env_read_current_process_config env_write_current_process_config env_reset_current_process_default env_list env_status env_create env_update env_open env_close env_read_config env_write_config env_generate_fingerprint env_capture_fingerprint env_import_fingerprint env_import env_delete</code> | 查询主进程与当前环境，维护生命周期，并读写、生成、采集或导入指纹配置 |
+
+`net_get` 仅返回请求/响应元信息与可获得的调用栈，不采集 body；脚本工具枚举顶层页面外部脚本，不是完整运行时源码目录。原生观测需通过 `deep_health` 确认本次新增记录。`notes_add / notes_get` 已移除，记忆统一使用 `remember / recall`。具体边界见 [功能清单](docs/features.md)。
 
 ---
 
 ## 源码构建
 
-仓库保存的是应用到 Firefox 源码树上的增量内容，主要代码位于 <code>additions/</code>。首次构建需要先准备锁定版本的 Firefox 源码：
+仓库保存的是应用到 Firefox 源码树上的增量内容，主要代码位于 <code>additions/</code>。以下命令在仓库根目录的 Bash 环境运行，需要 Node.js/npm、Python 3、Git 和 rsync。首次构建先打包 React，再准备锁定版本的 Firefox 源码并接入原生追踪：
 
 ~~~bash
+npm --prefix additions/browser/components/agent-sidebar install
+npm --prefix additions/browser/components/agent-sidebar run build
 bash scripts/bootstrap.sh
 bash scripts/apply-patches.sh
+python3 scripts/apply-phase-b.py upstream
 
-cd upstream
-./mach build
-./mach package
+bash scripts/build.sh
+bash scripts/package.sh
 ~~~
 
-日常开发不需要反复应用完整补丁。修改 <code>additions/</code> 后同步增量文件，再执行 faster 构建：
+`apply-patches.sh` 应用 `.patch`、同步 additions 并运行指纹接入脚本；它不调用 `apply-phase-b.py`。后者接入 SpiderMonkey 解释器和 WebIDL 追踪，完整分析构建需单独执行。`build.sh` 首次调用 `mach bootstrap` 安装 Firefox 构建依赖。对象与原始包在 `upstream/obj-*/dist/`，`package.sh` 将匹配的安装包复制到根目录 `dist/`。
+
+日常修改 JS、CSS 或资源时，同步增量文件后可执行 faster 构建；修改 JSX 需先重新打包：
 
 ~~~bash
+npm --prefix additions/browser/components/agent-sidebar run build
 bash scripts/sync-additions.sh
 
 cd upstream
 ./mach build faster
 ~~~
+
+修改 C++、WebIDL 或构建注册时使用完整 `./mach build`；修改接入脚本后还需对源码树执行对应脚本。不要在已打补丁的树上重复运行 `apply-patches.sh`，其 `git apply --index` 不保证重复应用成功。构建与平台限制见 [架构](docs/architecture.md)、[发布流程](docs/distribution.md)；测试入口见 [测试说明](tests/README.md)。
 
 主要维护区域：
 
@@ -161,6 +173,19 @@ cd upstream
 - <code>.github/workflows/release.yml</code>：自动化构建和发布流程。
 
 运行期的环境资料位于用户目录下的专用数据区域，不写入仓库或 Firefox 构建目录。
+
+### 运行终端持续输出 JavaScript error
+
+`JavaScript error: https://…` 表示浏览器加载的网页发生了 JavaScript 异常，并非编译错误。一些页面会主动循环触发异常；例如连续编号的 `Normal Error`、`TypeError`、`Getter Error`。如果页面正常而只有终端刷屏，关闭异常的终端转储即可，开发者工具仍会记录这些异常。
+
+项目默认将 `browser.dom.window.dump.enabled` 设为 `false`。已有 profile 若保留了 `true`，可在 `about:config` 中改为 `false`；使用默认开发 profile 时，也可以运行：
+
+~~~bash
+cd upstream
+./mach run --setpref browser.dom.window.dump.enabled=false
+~~~
+
+需要查看终端异常时，将该偏好改回 `true`。这个开关适用于普通构建；启用 `DEBUG` 或 `MOZ_ENABLE_JS_DUMP` 的构建会强制开启转储。页面卡死、加载失败或接口请求失败时，仍应通过开发者工具检查具体异常。
 
 ### 开发首页空白
 
@@ -190,7 +215,8 @@ cd upstream
 │  Agent Runtime                                                            │
 │  ├─ AgentRuntimeCore：状态、订阅、确认、取消与线程认领                    │
 │  ├─ AgentTurnOrchestrator：单轮编排、持久化、上下文与自动续跑             │
-│  └─ AgentLoop：模型调用与工具执行闭环                                     │
+│  ├─ AgentLoop：模型调用与工具执行闭环                                     │
+│  └─ UnifiedContext / UnifiedTurnContext：统一日志、任务目标与压缩预算     │
 │                                                                           │
 │  LLM Stack                                                                │
 │  ├─ LlmClient / LlmProtocol：稳定入口与协议转换                           │
@@ -199,7 +225,8 @@ cd upstream
 │                                                                           │
 │  ToolRouter + Backends                                                    │
 │  ├─ 页面、网络、源码、文件、Cookie、扩展、Skills 与记忆                   │
-│  └─ 环境管理、WebAPI、JSVMP、WASM 与白盒诊断                             │
+│  ├─ 环境管理、WebAPI、JSVMP、WASM 与白盒诊断                             │
+│  └─ MCP Manager / FirefoxMcpService：第三方工具、资源、提示词与授权       │
 │                                                                           │
 │  Gecko / SpiderMonkey                                                     │
 │  ├─ FrxFingerprintConfig：进程启动阶段加载指纹配置                        │
@@ -210,3 +237,10 @@ cd upstream
 ~~~
 
 最终交付通常包含两类结果：一套能够重复启动和管理的隔离浏览器环境，以及一份经过真实接口验证、可以脱离浏览器运行的 Node.js 或 Python 实现。
+
+## 文档导航
+
+- [架构与数据存储](docs/architecture.md) · [能力与限制](docs/features.md) · [当前状态与后续工作](docs/roadmap.md)
+- [侧边栏](docs/agent-sidebar.md) · [Runtime](docs/agent-runtime.md) · [原生能力](docs/agent-native-capabilities.md)
+- [环境管理](docs/fingerprint-environment-manager.md) · [原生一致指纹](docs/native-fingerprint-consistency.md) · [配置示例的适用范围](settings/README.md)
+- [逆向 SOP](docs/agent-reverse-sop.md) · [测试入口](tests/README.md) · [上游同步](docs/upstream-sync.md) · [发布流程](docs/distribution.md)

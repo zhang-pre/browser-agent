@@ -1,5 +1,5 @@
 {
-  "_comment": "Example fingerprint config. Environment files live under ~/.browser-agent/environments/<envId>/fingerprint.json.",
+  "_comment": "Legacy fingerprint field/capture example, not native-consistent defaults. Includes Chromium identity and fields not consumed by every policy. Generate new Firefox environments through EnvironmentBackend; see settings/README.md. Environment files live under ~/.browser-agent/environments/<envId>/fingerprint.json.",
   "schemaVersion": 1,
   "enabled": true,
   "seed_mode": "persistent",
