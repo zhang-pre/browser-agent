@@ -20,6 +20,7 @@ import { LedgerBackend } from "./LedgerBackend.sys.mjs";
 import { SkillBackend } from "./SkillBackend.sys.mjs";
 import { EnvironmentBackend } from "./EnvironmentBackend.sys.mjs";
 import { configStore } from "../providers/ConfigStore.sys.mjs";
+import { setupBundledRuntimePath } from "../host/BundledRuntimes.sys.mjs";
 
 let _singleton = null;
 
@@ -27,6 +28,7 @@ export function getBackends() {
   if (_singleton) {
     return _singleton;
   }
+  setupBundledRuntimePath();
   const page = new PageBackend();
   // net 拿 page 引用：net_capture 时 arm 内容侧发起者栈捕获，net_list/net_get 时 drain 合并 initiatorStack。
   const net = new NetworkBackend({ page });

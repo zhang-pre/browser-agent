@@ -61,6 +61,33 @@ browser-agent-mcp
 
 同时生成的 `firefox-*.tar.xz` 是便携包：解压后运行 `firefox/firefox`，需保留完整目录，不能只复制其中一个 ELF 可执行文件。便携包直接使用原始 Firefox 启动方式，不包含 `.deb` 的 profile 启动脚本或更新策略。
 
+### Windows x64 安装包
+
+在已准备 Firefox 源码树的 Linux/WSL 主机上，使用独立的 Windows 对象目录交叉编译，不复用 Linux 二进制：
+
+```bash
+sudo apt install msitools nsis libc6-i386 lib32gcc-s1 lib32stdc++6
+rustup target add x86_64-pc-windows-msvc
+make package-windows
+```
+
+`scripts/build-windows-x64.sh` 构建侧栏、同步 additions、执行原生接入脚本，随后使用 `configs/mozconfig.windows-x64` 下载 Windows SDK/工具链并编译、打包。默认使用 6 个编译任务，可通过 `BUILD_JOBS` 调整。首次编译会下载较大的工具链，耗时明显长于前端增量构建。
+
+产物位于 `dist/windows/<BuildID>/`：
+
+- `browser-agent-v<版本>-windows-x86_64.exe`：完整安装包，安装后从开始菜单打开 Firefox Reverse。
+- 同名 `.zip`：便携包，完整解压后运行 `firefox/firefox.exe`。
+- `SHA256SUMS`、`BUILD-INFO.json`、`README-WINDOWS.md`：校验值、构建来源与用户说明。
+- 工作区存在未提交改动时，另附 `SOURCE-CHANGES.patch`，避免把候选包误标为完全对应某个提交。
+
+Windows 配置显式启用 `--with-redist`，随应用携带 VC 运行库 DLL。包内还包括独立的 Node.js/npm 和 Python/pip，下载版本与 SHA256 固定在 `configs/windows-runtimes.json`。Agent 只为自身进程追加私有运行时目录，不修改系统 PATH；用户显式配置的解释器路径仍优先。Python 额外依赖默认落在当前工作目录的 `.python-packages`，也支持导入工作目录和脚本目录中的模块。
+
+整理产物时会检查 ZIP 完整性、Windows x64 可执行文件、当前 AgentLoop/后端模块、新 logo 和运行时清单。原生 Windows 启动验证是单独步骤，不能用交叉编译成功替代。此构建不执行代码签名。GitHub 发布前应提交对应源码并记录原生验证结果。
+
+此路径执行现有 Phase B 接入脚本，沿用其关闭 Windows 内容进程沙箱的行为，以允许原生追踪写入临时文件。候选包的用户说明会明确记录这一构建取舍。
+
+本次产物的校验值与原生验证结果见 [Windows v0.24.1 候选包记录](releases/windows-v0.24.1/README.md)。
+
 ## 包验证
 
 - `.github/workflows/validate-windows-package.yml` 是独立手动作业，输入候选 Release tag、SHA256、SourceStamp 和 BuildID，用 `scripts/verify-windows-package.py` 在 Windows 启动候选包并检查结果。

@@ -28,6 +28,7 @@ SELFTESTS=(
   selftest-agent-turn-orchestrator.mjs
   selftest-auto-continue.mjs
   selftest-final-response.mjs
+  selftest-bundled-runtimes.mjs
   selftest-config.mjs
   selftest-typography.mjs
   selftest-mcp-extensions.mjs

@@ -12,6 +12,7 @@ const upstreamRoot = process.argv[2]
   : null;
 
 const required = [
+  "branding.nsi",
   "configure.sh",
   "default16.png",
   "default32.png",
@@ -60,6 +61,13 @@ for (const relative of required) {
 const configure = await readFile(path.join(sourceRoot, "configure.sh"), "utf8");
 if (!/MOZ_APP_DISPLAYNAME=["']?Firefox Reverse["']?/.test(configure)) {
   fail("configure.sh does not set MOZ_APP_DISPLAYNAME to Firefox Reverse");
+}
+
+const installerBranding = await readFile(path.join(sourceRoot, "branding.nsi"), "utf8");
+for (const name of ["BrandFullNameInternal", "BrandFullName"]) {
+  if (!new RegExp(`^!define ${name}\\s+"Firefox Reverse"\\s*$`, "m").test(installerBranding)) {
+    fail(`Windows installer ${name} is not Firefox Reverse`);
+  }
 }
 
 const brandFtl = await readFile(path.join(sourceRoot, "locales/en-US/brand.ftl"), "utf8");
