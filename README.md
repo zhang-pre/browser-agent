@@ -152,6 +152,8 @@ bash scripts/package.sh
 
 `apply-patches.sh` 应用 `.patch`、同步 additions 并运行指纹接入脚本；它不调用 `apply-phase-b.py`。后者接入 SpiderMonkey 解释器和 WebIDL 追踪，完整分析构建需单独执行。`build.sh` 首次调用 `mach bootstrap` 安装 Firefox 构建依赖。对象与原始包在 `upstream/obj-*/dist/`，`package.sh` 将匹配的安装包复制到根目录 `dist/`。
 
+在 Ubuntu/Debian 上，希望安装后从应用菜单启动，可在编译完成后运行 `make package-deb`，生成带图标和独立 profile 的 `.deb` 安装包。安装、升级与便携包用法见 [Ubuntu 应用安装包](docs/distribution.md#ubuntu-应用安装包)。
+
 日常修改 JS、CSS 或资源时，同步增量文件后可执行 faster 构建；修改 JSX 需先重新打包：
 
 ~~~bash

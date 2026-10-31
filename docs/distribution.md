@@ -23,11 +23,43 @@
 |---|---|
 | `upstream/obj-*/dist/` | mach 构建与打包输出 |
 | `scripts/package.sh` | 调用 `mach package`，复制匹配的 `firefox-*` tar.xz/dmg/zip/exe/deb 到根目录 `dist/`；可用 `DIST_DIR` 覆盖 |
+| `scripts/package-linux-deb.py` | 将 Linux tar.xz 转为带菜单入口、图标、独立 profile 的 `.deb`，并生成 SHA256 校验文件 |
 | `scripts/build-linux-arm64.sh`、`configs/mozconfig.linux-arm64` | 独立 Linux arm64 构建路径，不在 release 工作流矩阵中 |
 | `scripts/repack-zh-cn.sh`、`verify-zh-cn-stage.sh` | 简体中文重打包与 stage 检查 |
 | `scripts/macos-adhoc-sign-apps.sh`、`macos-verify-dmg.sh` | macOS ad-hoc 签名与包检查 |
 
 没有承诺可下载的 patched-source 包；如果实际 Release 只有二进制，使用仓库构建路径。
+
+### Ubuntu 应用安装包
+
+已经编译完成时，在 Ubuntu/Debian 的仓库根目录执行（包括 WSL Ubuntu）：
+
+```bash
+make package-deb
+```
+
+此命令先运行 `mach package`，再生成 `dist/browser-agent-mcp_<引擎版本>+build<BuildID>_<架构>.deb`。它不重新编译 C++ 或构建 React；修改源码后应先完成相应构建。打包需要 Python 3.12+、`dpkg-dev`、`binutils`，不需要 root。支持在 amd64/arm64 主机上打包相同架构的浏览器；系统库依赖和最低版本由本机 `dpkg-shlibdeps` 从 ELF 产物计算，不能据此承诺兼容更老的 Ubuntu。
+
+已有便携包时可以直接转换，避免重复打包：
+
+```bash
+python3 scripts/package-linux-deb.py dist/firefox-153.0a1.en-US.linux-x86_64.tar.xz
+```
+
+若 `dist/` 有多个 Linux tar.xz，必须指定具体输入；可用 `make package-deb LINUX_PACKAGE=/absolute/path/package.tar.xz`，或直接运行上述 Python 命令。`--output-dir` 可指定 `.deb` 输出目录。包版本取自实际产物中的 `application.ini`，不是当前源码的 Agent 版本。
+
+安装时将以下路径换成实际输出文件名：
+
+```bash
+sudo apt install ./dist/browser-agent-mcp_<版本>_amd64.deb
+browser-agent-mcp
+```
+
+安装后可以从应用菜单打开 **Browser Agent MCP**。程序文件在 `/opt/browser-agent-mcp/`，命令在 `/usr/bin/browser-agent-mcp`；默认 profile 在 `${XDG_CONFIG_HOME:-$HOME/.config}/browser-agent-mcp/profile`。可设置 `BROWSER_AGENT_PROFILE`，或显式传入 `-profile /absolute/path` 使用其他 profile。安装版设置独立的 Firefox remoting 名称，避免接入系统 Firefox 进程；不自动迁移开发 profile，也不自动设为系统默认浏览器。WSL 图形启动需要 WSLg 或可用的图形显示环境。
+
+安装版禁用 Mozilla 自动更新，后续用新生成的 `.deb` 升级，保留定制内核与侧边栏。`run_node`、`npm_install`、`run_python` 等功能仍需要系统中的 Node.js/npm/Python；这些运行时不嵌入浏览器包。卸载使用 `sudo apt remove browser-agent-mcp`，用户 profile 会保留。
+
+同时生成的 `firefox-*.tar.xz` 是便携包：解压后运行 `firefox/firefox`，需保留完整目录，不能只复制其中一个 ELF 可执行文件。便携包直接使用原始 Firefox 启动方式，不包含 `.deb` 的 profile 启动脚本或更新策略。
 
 ## 包验证
 
