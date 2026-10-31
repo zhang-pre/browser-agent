@@ -11,6 +11,28 @@ import { mcpOnlyPrompt } from "../tools/LocalCapabilityPolicy.sys.mjs";
 import { createMcpSessionRequestHandler } from "../mcp/McpSessionRequests.sys.mjs";
 import { createUnifiedTurnContext } from "../state/UnifiedTurnContext.sys.mjs";
 
+const MAX_AUTO_CONTINUE = 3;
+
+function isUnfinishedActionPlan(content, messages) {
+  const latest = messages.findLast(message => message.role === "user" &&
+    !message._contextSynthetic && !message.internal && !/^（系统[）·]/.test(String(message.content)));
+  const request = (Array.isArray(latest?.content)
+    ? latest.content.map(block => block?.text || "").join("\n") : String(latest?.content || "")).trim();
+  const reportRequest = /^(?:(?:请|麻烦你|麻烦|帮我|先|只要|只需|只|仅|直接|please)\s*)*(?:总结|汇总|概括|复盘|解释|说明|回答|summari[sz]e\b|explain\b|describe\b|recap\b)/i.test(request);
+  const requestsExecution = /(?:并|然后|接着|之后|后|再)\s*(?:继续|执行|检查|验证|修复|运行)|\b(?:and(?:\s+then)?|then)\s+(?:continue|execute|check|verify|fix|run)\b/i.test(request);
+  if (reportRequest && !requestsExecution) return false;
+
+  const text = String(content || "").replace(/```[\s\S]*?```|`[^`\n]*`/g, "").replace(/^\s*>.*$/gm, "").trim();
+  if (!text) return !String(content || "").trim();
+  if (/(?:需要|等待|等候)(?:你|您|用户)|请(?:你|您)?(?:提供|输入|登录|登陆|选择|决定|确认)|\b(?:need|waiting for)\s+(?:you|your|user)\b|\bplease\s+(?:provide|enter|log in|choose|confirm)\b/i.test(text)) return false;
+  const chinesePlan = /(?:接下来|下一步|随后|然后|现在|我(?:们)?(?:将(?:会)?|会|要|先|再|来|准备|打算|继续)|让我(?:们)?|^\s*(?:先|继续|准备|开始))[^。！？\n]{0,60}(?:检查|分析|验证|执行|调用|读取|查看|搜索|查找|抓取|抓包|测试|运行|生成|保存|写入|修改|修复|实现|定位)/m;
+  const englishPlan = /\b(?:I(?:['’]ll| will| am going to|['’]m going to)|we(?:['’]ll| will)|let (?:me|us)|next[, :]*)\s+[^.!?\n]{0,60}\b(?:check|inspect|analy[sz]e|verify|execute|call|read|search|fetch|test|run|generate|save|write|modify|fix|implement|investigate)\b/i;
+  return text.split(/[。！？.!?\n]+/).some(part => {
+    const clause = part.replace(/^[\s#*>-]+/, "");
+    const suggestion = /^(?:(?:下一步|接下来|后续)[：:\s]*)?(?:建议|可选|如需|如果(?:你|您)|你可以|您可以)|^(?:next[, :]*\s*)?(?:you (?:can|could|may)\b|optional\b|if (?:you|needed)\b)/i.test(clause);
+    return !suggestion && (chinesePlan.test(clause) || englishPlan.test(clause) || /^(?:继续|continue)$/i.test(clause));
+  });
+}
 
 // 【输出被长度限制截断】的专用重试上限——**与 autoContinue/drift 完全解耦**。
 // 思考型模型(DeepSeek reasoner 等)的 reasoning_content 不受 prompt 约束、长度无界：难题轮里
@@ -342,6 +364,7 @@ export async function runAgentTurn(p) {
   const toolCounts = {}; // 每个工具本回合调用次数（防打转）
   const failSigs = {}; // (工具+错误签名) → 次数（反绕圈：同错反复出现就提示换路线）
   let consecErr = 0; // 连续失败计数（任意类型错；任一成功即清零）——抓"各种错连环=空转"
+  let autoContinues = 0;
   let truncRetries = 0; // 【输出长度截断】专用重试计数——与 autoContinues 解耦，截断不算"漂移"，免误判停
   // A2 重复调用熔断：callSig → { fp:上次结果指纹, n:连续相同结果次数 }。同调用同结果≥阈值=空转，引擎拒执行。
   const repeatTracker = new Map();
@@ -359,6 +382,7 @@ export async function runAgentTurn(p) {
     if (signal?.aborted || !incoming?.length) return false;
     turnContext.appendSteering(msgs, incoming);
     await turnContext.refresh();
+    autoContinues = 0;
     truncRetries = 0;
     return true;
   }
@@ -454,8 +478,26 @@ export async function runAgentTurn(p) {
         continue;
       }
 
-      // A complete provider response without tool calls ends the turn.
-      // Reporting/summary requests require no action and must not be rewritten by a keyword heuristic.
+      if (!assist && tools.length && isUnfinishedActionPlan(txt, msgs)) {
+        if (autoContinues >= MAX_AUTO_CONTINUE) {
+          const content = txt + "\n\n（系统）连续多轮未收到可执行的工具调用；模型仍在描述下一步，尚未完成任务。";
+          emit({ type: "final", content, round });
+          return {
+            content, reasoningContent: res.reasoningContent, providerState: res.providerState,
+            rounds: round, toolCalls: allToolCalls, messages: msgs, stopReason: "drift",
+          };
+        }
+        autoContinues++;
+        msgs.push(assistantReply(res, txt));
+        msgs.push({
+          role: "user",
+          content: "（系统·自动续跑）上一条只描述了下一步，尚未执行。请基于已有结果继续完成当前请求，" +
+            "需要执行操作时现在就调用工具，不要等待用户输入‘继续’。不要重做已完成的步骤；" +
+            "若当前请求已经完成、仅需总结回答，或确实缺少用户才能提供的信息，请直接给出结果或说明具体所需输入。",
+        });
+        continue;
+      }
+
       const content = txt.trim() ? res.content : "模型返回了空回复，请重试或检查 provider 响应。";
       emit({ type: "final", content, round });
       return {
@@ -463,6 +505,7 @@ export async function runAgentTurn(p) {
         rounds: round, toolCalls: allToolCalls, messages: msgs, stopReason: "final",
       };
     }
+    autoContinues = 0;
     truncRetries = 0; // 成功产出工具调用 → 清零截断重试计数（只数**连续**截断，免长会话零星截断攒到上限误停）
 
     // Keep the complete assistant response paired with all tool results.

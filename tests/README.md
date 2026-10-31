@@ -24,7 +24,6 @@ node --import ./scripts/tests/register-product-name.mjs additions/browser/compon
 node --import ./scripts/tests/register-product-name.mjs additions/browser/components/agent-sidebar/dev/selftest-native-health.mjs
 node --import ./scripts/tests/register-product-name.mjs additions/browser/components/agent-sidebar/dev/selftest-deep-runtime.mjs
 node --import ./scripts/tests/register-product-name.mjs additions/browser/components/agent-sidebar/dev/selftest-backend-evidence.mjs
-node --import ./scripts/tests/register-product-name.mjs additions/browser/components/agent-sidebar/dev/selftest-final-response.mjs
 ```
 
 单独的 LLM 请求构造检查是 `node additions/browser/components/agent-sidebar/dev/selftest-llm.mjs`，默认 dry-run；`--live` 才发真实请求，使用 `DEEPSEEK_API_KEY` 环境变量。

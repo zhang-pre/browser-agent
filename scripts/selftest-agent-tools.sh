@@ -26,6 +26,8 @@ SELFTESTS=(
   selftest-agent-runtime-factory.mjs
   selftest-agent-steer.mjs
   selftest-agent-turn-orchestrator.mjs
+  selftest-auto-continue.mjs
+  selftest-final-response.mjs
   selftest-config.mjs
   selftest-typography.mjs
   selftest-mcp-extensions.mjs
