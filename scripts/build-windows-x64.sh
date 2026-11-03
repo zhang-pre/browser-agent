@@ -5,12 +5,16 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 upstream=${UPSTREAM_DIR:-"$repo_root/upstream"}
 objdir="$upstream/obj-x86_64-pc-windows-msvc"
 
+# Windows uses the existing stable compiler/target cache. Its explicit unknown
+# host vendor avoids the Rust 1.98 ambiguity affecting the native Linux build.
+export RUSTUP_TOOLCHAIN="${WINDOWS_RUST_TOOLCHAIN:-${RUSTUP_TOOLCHAIN:-stable}}"
+
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 || ! -x "$upstream/mach" ]]; then
   echo "A Linux x86_64 host and prepared Firefox source tree are required." >&2
   exit 1
 fi
 
-for tool in node npm python3 msiextract makensis; do
+for tool in node npm python3 msiextract makensis make; do
   command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
 done
 if [[ ! -e /lib/ld-linux.so.2 ]]; then
@@ -41,7 +45,13 @@ if [[ ${#archives[@]} != 1 ]]; then
   exit 1
 fi
 python3 "$repo_root/scripts/bundle-windows-runtimes.py" "${archives[0]}"
-ZIP_IN="${archives[0]}" ./mach build --allow-subdirectory-build -C browser/installer/windows installer
+sfx="$objdir/dist/web-reverse-7zSD.Win32.sfx"
+python3 "$repo_root/scripts/brand-windows-sfx.py" \
+  "$upstream/other-licenses/7zstub/firefox/7zSD.Win32.sfx" "$sfx" \
+  --icon "$repo_root/additions/browser/branding/unofficial/firefox.ico"
+# mach build runs each target separately, so a VAR=value target does not apply
+# to the installer target. Pass both variables to one make invocation instead.
+make -C "$objdir/browser/installer/windows" installer "ZIP_IN=${archives[0]}" "SFX_MODULE=$sfx"
 
 mapfile -t installers < <(find "$objdir/dist" -maxdepth 4 -type f -name 'firefox-*.win64.installer.exe')
 if [[ ${#installers[@]} != 1 ]]; then
@@ -50,5 +60,7 @@ if [[ ${#installers[@]} != 1 ]]; then
 fi
 
 output=${DIST_DIR:-"$repo_root/dist/windows/$MOZ_BUILD_DATE"}
+python3 "$repo_root/scripts/verify-windows-installer.py" "${archives[0]}" "${installers[0]}" \
+  --output-dir "$output" --setup-output "$objdir/dist/web-reverse-installer-setup.exe"
 python3 "$repo_root/scripts/prepare-windows-release.py" "${archives[0]}" "${installers[0]}" --output-dir "$output"
 echo "Windows packages: $output"

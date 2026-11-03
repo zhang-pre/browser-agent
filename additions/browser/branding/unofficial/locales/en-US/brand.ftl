@@ -16,11 +16,11 @@
 ## For further details, consult:
 ## https://mozilla-l10n.github.io/styleguides/mozilla_general/#brands-copyright-and-trademark
 
--brand-shorter-name = Firefox Reverse
--brand-short-name = Firefox Reverse
--brand-shortcut-name = Firefox Reverse
--brand-full-name = Firefox Reverse
+-brand-shorter-name = Web Reverse
+-brand-short-name = Web Reverse
+-brand-shortcut-name = Web Reverse
+-brand-full-name = Web Reverse
 # This brand name is used in messages that need a stable product name.
--brand-product-name = Firefox Reverse
+-brand-product-name = Web Reverse
 -vendor-short-name = Mozilla
 trademarkInfo = { " " }

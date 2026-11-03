@@ -59,14 +59,17 @@ for (const relative of required) {
 }
 
 const configure = await readFile(path.join(sourceRoot, "configure.sh"), "utf8");
-if (!/MOZ_APP_DISPLAYNAME=["']?Firefox Reverse["']?/.test(configure)) {
-  fail("configure.sh does not set MOZ_APP_DISPLAYNAME to Firefox Reverse");
+if (!/MOZ_APP_DISPLAYNAME=["']?Web Reverse["']?/.test(configure)) {
+  fail("configure.sh does not set MOZ_APP_DISPLAYNAME to Web Reverse");
 }
 
+// Keep registry/install identity stable while changing every display name.
 const installerBranding = await readFile(path.join(sourceRoot, "branding.nsi"), "utf8");
-for (const name of ["BrandFullNameInternal", "BrandFullName"]) {
-  if (!new RegExp(`^!define ${name}\\s+"Firefox Reverse"\\s*$`, "m").test(installerBranding)) {
-    fail(`Windows installer ${name} is not Firefox Reverse`);
+for (const [name, expected] of Object.entries({
+  BrandFullNameInternal: "Firefox Reverse", BrandFullName: "Web Reverse", CompanyName: "Web Reverse",
+})) {
+  if (!new RegExp(`^!define ${name}\\s+"${expected}"\\s*$`, "m").test(installerBranding)) {
+    fail(`Windows installer ${name} is not ${expected}`);
   }
 }
 
@@ -78,15 +81,15 @@ for (const key of [
   "-brand-full-name",
   "-brand-product-name",
 ]) {
-  if (!new RegExp(`^${key}\\s*=\\s*Firefox Reverse\\s*$`, "m").test(brandFtl)) {
-    fail(`${key} is not Firefox Reverse`);
+  if (!new RegExp(`^${key}\\s*=\\s*Web Reverse\\s*$`, "m").test(brandFtl)) {
+    fail(`${key} is not Web Reverse`);
   }
 }
 
 for (const relative of ["content/about-wordmark.svg", "content/firefox-wordmark.svg"]) {
   const wordmark = await readFile(path.join(sourceRoot, relative), "utf8");
-  if (!wordmark.includes("Firefox Reverse") || /Nightly/i.test(wordmark)) {
-    fail(`${relative} does not contain the Firefox Reverse wordmark`);
+  if (!wordmark.includes("Web Reverse") || /Nightly/i.test(wordmark)) {
+    fail(`${relative} does not contain the Web Reverse wordmark`);
   }
 }
 
@@ -99,14 +102,14 @@ for (const relative of [
   "content/about.png",
 ]) {
   if ((await digest(path.join(sourceRoot, relative))) !== logoHash) {
-    fail(`${relative} is not derived from the Firefox Reverse app logo`);
+    fail(`${relative} is not derived from the Web Reverse app logo`);
   }
 }
 
 const iconHash = await digest(path.join(sourceRoot, "firefox.ico"));
 for (const relative of ["newtab.ico", "newwindow.ico", "pbmode.ico"]) {
   if ((await digest(path.join(sourceRoot, relative))) !== iconHash) {
-    fail(`${relative} does not match the Firefox Reverse Windows icon`);
+    fail(`${relative} does not match the Web Reverse Windows icon`);
   }
 }
 

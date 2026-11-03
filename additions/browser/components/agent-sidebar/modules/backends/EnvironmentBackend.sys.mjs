@@ -28,6 +28,7 @@ const FIREFOX_ONLY_POLICY = "firefox-only-v1";
 const ENV_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const CURRENT_PROCESS_DIR_NAME = ".current-process";
 const CURRENT_PROCESS_ID = "current-process";
+// Persisted user.js delimiters must survive display-name changes.
 const USERJS_BLOCK_START = "// >>> Firefox Reverse current-process fingerprint prefs";
 const USERJS_BLOCK_END = "// <<< Firefox Reverse current-process fingerprint prefs";
 const AUTOMATION_STEALTH_PREFS = {
@@ -447,7 +448,7 @@ function shortEnv(env) {
 }
 
 function envDisplayName(env) {
-  return String(env?.name || env?.id || "Firefox Reverse Environment").trim();
+  return String(env?.name || env?.id || "Web Reverse Environment").trim();
 }
 
 function processLabelFor(env) {
@@ -457,9 +458,9 @@ function processLabelFor(env) {
 function processSlotLabel(port) {
   const n = Number(port);
   if (Number.isFinite(n) && n >= DEFAULT_PORT_BASE && n < DEFAULT_PORT_BASE + MAX_PORT_SCAN) {
-    return `Firefox Reverse ${n - DEFAULT_PORT_BASE + 1}`;
+    return `Web Reverse ${n - DEFAULT_PORT_BASE + 1}`;
   }
-  return "Firefox Reverse";
+  return "Web Reverse";
 }
 
 export class EnvironmentBackend {
@@ -609,7 +610,7 @@ export class EnvironmentBackend {
         status: "current",
         pid: safe(() => Services.appinfo.processID, null),
         marionettePort: this._currentMarionettePort(),
-        processLabel: "Firefox Reverse 主进程",
+        processLabel: "Web Reverse 主进程",
       },
     };
   }
@@ -1801,7 +1802,7 @@ export class EnvironmentBackend {
       profilePath: res.paths.profilePath,
       config: data,
       needsRestart: true,
-      note: "当前主进程的 C++ 指纹配置按启动读取；保存后请重启 Firefox Reverse 主进程。",
+      note: "当前主进程的 C++ 指纹配置按启动读取；保存后请重启 Web Reverse 主进程。",
     };
   }
 
@@ -1910,7 +1911,7 @@ export class EnvironmentBackend {
       reset: true,
       profilePath: p.profilePath,
       needsRestart: true,
-      note: "已还原当前主进程默认配置；请重启 Firefox Reverse，让 C++ 指纹配置回退到原始行为。",
+      note: "已还原当前主进程默认配置；请重启 Web Reverse，让 C++ 指纹配置回退到原始行为。",
     };
   }
 
@@ -2258,7 +2259,7 @@ export class EnvironmentBackend {
   }
 
   _processArgv0(env, port = null) {
-    return String(processSlotLabel(port) || processLabelFor(env) || env.id || "Firefox Reverse")
+    return String(processSlotLabel(port) || processLabelFor(env) || env.id || "Web Reverse")
       .replace(/[\u0000/]+/g, " ")
       .trim()
       .slice(0, 80) || env.id;
@@ -2851,7 +2852,7 @@ export class EnvironmentBackend {
       source: {
         type: "current-browser-js",
         url: safe(() => globalThis.location.href, ""),
-        note: "Captured from the currently running Firefox Reverse chrome JS environment.",
+        note: "Captured from the currently running Web Reverse chrome JS environment.",
       },
       navigator: {
         userAgent: safe(() => nav.userAgent, ""),

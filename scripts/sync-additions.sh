@@ -21,6 +21,8 @@ rsync -a --exclude README.md --exclude node_modules --exclude dev \
   --exclude '*.jsx' --exclude 'package*.json' --exclude .gitignore \
   "$REPO_ROOT/additions/" "$UPSTREAM_DIR/"
 
+python3 "$REPO_ROOT/scripts/apply-product-branding.py" "$UPSTREAM_DIR"
+
 if ! cmp -s \
   "$REPO_ROOT/additions/browser/components/agent-sidebar/moz.build" \
   "$UPSTREAM_DIR/browser/components/agent-sidebar/moz.build"; then

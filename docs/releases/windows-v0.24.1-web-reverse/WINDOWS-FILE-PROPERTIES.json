@@ -1,0 +1,38 @@
+{
+  "installer": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "Web Reverse Installer",
+    "CompanyName": "Web Reverse",
+    "OriginalFilename": "web-reverse-setup.exe"
+  },
+  "setup.exe": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "Web Reverse Installer",
+    "CompanyName": "Web Reverse",
+    "OriginalFilename": "setup.exe"
+  },
+  "firefox.exe": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "Web Reverse",
+    "CompanyName": "Mozilla Corporation",
+    "OriginalFilename": "firefox.exe"
+  },
+  "private_browsing.exe": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "Web Reverse",
+    "CompanyName": "Mozilla Corporation",
+    "OriginalFilename": "private_browsing.exe"
+  },
+  "desktop-launcher/desktop-launcher.exe": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "",
+    "CompanyName": "Mozilla Foundation",
+    "OriginalFilename": "desktop-launcher.exe"
+  },
+  "uninstall/helper.exe": {
+    "ProductName": "Web Reverse",
+    "FileDescription": "Web Reverse Helper",
+    "CompanyName": "Web Reverse",
+    "OriginalFilename": "helper.exe"
+  }
+}

@@ -13,6 +13,8 @@ bash scripts/selftest-agent-tools.sh
 
 脚本先构建侧栏 bundle，再执行 `SELFTESTS` 数组里的 Node 自测，最后检查产品名与品牌资源。每个数组项经 `scripts/tests/register-product-name.mjs` loader 启动。覆盖 Runtime、模型请求/流、会话/统一上下文、记忆、工具路由、MCP、环境及安装清单等；清单以脚本为准，不代表 `dev/` 下每个自测都会被执行。
 
+改名兼容还通过 `scripts/tests/product-branding.py` 检查侧栏同步的幂等性和 macOS 安装路径，通过 `scripts/tests/linux-launcher.py` 在临时目录执行真实启动脚本，验证新旧命令、默认 profile、自定义路径和显式 profile 参数。
+
 这些测试默认不请求真实模型，不启动 Firefox UI。少数 MCP 测试使用本地 fixture/子进程，需要相应本机运行条件。
 
 ## 额外定向测试
@@ -41,6 +43,7 @@ c++ -std=c++17 -Wall -Wextra -Werror -I additions/dom/media/webaudio \
 
 ## 真实 Firefox 与安装包
 
+- 改名与基础功能 smoke：`python3 scripts/tests/selftest-product-firefox.py --binary /path/to/firefox`，使用独立 profile、旧格式夹具和本地 HTTP 服务，验证实际侧栏标题、旧配置/会话兼容、跨重启持久化、SQLite、文件/Node/Python、环境列表、页面操作、网络捕获和模拟 Agent 工具循环。报告写入 `.tmp/product-native-report.json`；不会打开原用户 profile 或调用真实模型。
 - MCP stdio/HTTP、roots 与凭据测试：`dev/selftest-mcp-firefox.js`，启动方式及隔离 profile 要求见 [MCP 文档](../docs/mcp-client.md#复现-linux-原生测试)。
 - 订阅本地认证/存储 smoke：`python3 scripts/tests/selftest-subscription-firefox.py --binary /path/to/firefox`，使用临时 profile，不做真实账号登录或付费模型请求。
 - 扩展退出修复：`node scripts/tests/extension-shutdown.mjs /path/to/patched-gecko`，是类级回归，仍需实际启动/退出检查。

@@ -39,6 +39,22 @@ def patch_file(path, transformations):
         open(path, "w").write(content)
 
 
+def ensure_trace_include(path):
+    """Keep new and previously patched interpreters in SpiderMonkey include order."""
+    with open(path, encoding="utf-8") as source:
+        original = source.read()
+    header = '#include "vm/JsvmpTraceCore.h"\n'
+    anchor = '#include "vm/JSScript.h"\n'
+    content = original.replace(header, "")
+    if content.count(anchor) != 1:
+        raise ValueError(f"Cannot locate the interpreter's JSScript include: {path}")
+    content = content.replace(anchor, anchor + header, 1)
+    if content != original:
+        with open(path, "w", encoding="utf-8") as target:
+            target.write(content)
+        print("  [done] place JsvmpTraceCore.h in sorted vm headers")
+
+
 # ---------------------------------------------------------------------------
 # 1. js/src/vm/moz.build: 加 JsvmpTraceCore.cpp 到 UNIFIED_SOURCES
 #    （字母顺序：JSScript.cpp 后，List.cpp 前）
@@ -84,12 +100,8 @@ OLD_INTERPRET_FN = (
 )
 NEW_INTERPRET_FN = OLD_INTERPRET_FN + '  mozilla::jsvmp::EnsureInit();\n'
 
+ensure_trace_include(ipath)
 patch_file(ipath, [
-    (
-        "add include for JsvmpTraceCore.h",
-        '#include "jit/JitZone.h"\n',
-        '#include "jit/JitZone.h"\n#include "vm/JsvmpTraceCore.h"\n',
-    ),
     (
         "add EnsureInit() at top of js::Interpret()",
         OLD_INTERPRET_FN,

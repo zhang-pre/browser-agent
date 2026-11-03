@@ -1,4 +1,4 @@
-# browser-agent top-level Makefile
+# Web Reverse top-level Makefile
 # 详细说明见 scripts/ 各脚本和 docs/architecture.md
 
 SHELL := /bin/bash
@@ -8,7 +8,7 @@ BUILD_DIR ?= build
 .PHONY: help bootstrap patch build package package-deb package-windows clean reset
 
 help:
-	@echo "browser-agent build targets:"
+	@echo "Web Reverse build targets:"
 	@echo "  make bootstrap   - 拉取上游 mozilla-firefox/firefox 源码"
 	@echo "  make patch       - 应用 patches/ 下所有补丁"
 	@echo "  make build       - 编译"

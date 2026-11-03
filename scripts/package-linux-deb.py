@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -17,7 +18,10 @@ import tempfile
 import zipfile
 
 
+# Keep dpkg's package identity, installation path, desktop ID and profile path
+# stable so this is an upgrade of the installed application.
 PACKAGE = "browser-agent-mcp"
+PRODUCT_SLUG = "web-reverse"
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -29,6 +33,29 @@ def write(path, content, mode=0o644):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     path.chmod(mode)
+
+
+def launcher_script(binary="/opt/browser-agent-mcp/firefox"):
+    return '''#!/bin/sh
+set -eu
+export MOZ_APP_REMOTINGNAME=browser-agent-mcp
+if [ "${BROWSER_AGENT_PROFILE+x}" = x ]; then
+    profile=$BROWSER_AGENT_PROFILE
+else
+    profile="${XDG_CONFIG_HOME:-$HOME/.config}/browser-agent-mcp/profile"
+fi
+explicit_profile=false
+for arg in "$@"; do
+    case "$arg" in
+        -profile|--profile|-P|-ProfileManager|--ProfileManager) explicit_profile=true ;;
+    esac
+done
+if [ "$explicit_profile" = true ]; then
+    exec @FIREFOX@ "$@"
+fi
+mkdir -p "$profile"
+exec @FIREFOX@ -profile "$profile" "$@"
+'''.replace("@FIREFOX@", shlex.quote(str(binary)))
 
 
 def build(archive, output):
@@ -71,35 +98,17 @@ def build(archive, output):
                     raise ValueError(f"Agent module missing from archive: {module}")
         # The default profile belongs to this app. Explicit -profile arguments
         # remain supported for isolated environments and automated validation.
-        write(stage / "usr/bin" / PACKAGE, '''#!/bin/sh
-set -eu
-export MOZ_APP_REMOTINGNAME=browser-agent-mcp
-if [ "${BROWSER_AGENT_PROFILE+x}" = x ]; then
-    profile=$BROWSER_AGENT_PROFILE
-else
-    profile="${XDG_CONFIG_HOME:-$HOME/.config}/browser-agent-mcp/profile"
-fi
-explicit_profile=false
-for arg in "$@"; do
-    case "$arg" in
-        -profile|--profile|-P|-ProfileManager|--ProfileManager) explicit_profile=true ;;
-    esac
-done
-if [ "$explicit_profile" = true ]; then
-    exec /opt/browser-agent-mcp/firefox "$@"
-fi
-mkdir -p "$profile"
-exec /opt/browser-agent-mcp/firefox -profile "$profile" "$@"
-''', 0o755)
+        write(stage / "usr/bin" / PACKAGE, launcher_script(), 0o755)
+        (stage / "usr/bin" / PRODUCT_SLUG).symlink_to(PACKAGE)
         write(stage / "usr/share/applications" / f"{PACKAGE}.desktop", """[Desktop Entry]
 Version=1.0
 Type=Application
-Name=Browser Agent MCP
-Name[zh_CN]=Browser Agent MCP 浏览器
+Name=Web Reverse
+Name[zh_CN]=Web Reverse 浏览器
 Comment=Firefox browser with a built-in analysis agent
 Comment[zh_CN]=内置分析 Agent 的 Firefox 浏览器
-Exec=browser-agent-mcp %u
-TryExec=browser-agent-mcp
+Exec=web-reverse %u
+TryExec=web-reverse
 Icon=browser-agent-mcp
 Terminal=false
 Categories=Network;WebBrowser;Development;
@@ -122,7 +131,7 @@ StartupWMClass=browser-agent-mcp
         write(work / "debian/control", f"""Source: {PACKAGE}
 Section: web
 Priority: optional
-Maintainer: Browser Agent MCP contributors <noreply@users.noreply.github.com>
+Maintainer: Web Reverse contributors <noreply@users.noreply.github.com>
 
 Package: {PACKAGE}
 Architecture: {arch}
@@ -150,22 +159,22 @@ Description: Firefox browser with a built-in analysis agent
         write(stage / "DEBIAN/control", f"""Package: {PACKAGE}
 Version: {version}
 Architecture: {arch}
-Maintainer: Browser Agent MCP contributors <noreply@users.noreply.github.com>
+Maintainer: Web Reverse contributors <noreply@users.noreply.github.com>
 Section: web
 Priority: optional
 Installed-Size: {size}
 Depends: {dependencies}
 Recommends: ca-certificates, libasound2t64 | libasound2, libpulse0
 Suggests: nodejs, npm, python3
-Homepage: https://github.com/zhang-pre/browser-agent-mcp
+Homepage: https://github.com/zhang-pre/browser-agent
 Description: Firefox browser with a built-in analysis agent
- Browser Agent MCP provides an agent sidebar and isolated browser environments.
+ Web Reverse provides an agent sidebar and isolated browser environments.
  Packaged from an existing Firefox build with a dedicated application profile.
 """)
         desktop = stage / "usr/share/applications" / f"{PACKAGE}.desktop"
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", desktop], check=True)
-        filename = f"{PACKAGE}_{version}_{arch}.deb"
+        filename = f"{PRODUCT_SLUG}_{version}_{arch}.deb"
         # Build in the temporary directory so interrupted runs do not leave a
         # partial .deb at the published output path.
         subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", "-z3",
@@ -177,7 +186,7 @@ Description: Firefox browser with a built-in analysis agent
         write(output / (filename + ".sha256"), f"{digest}  {filename}\n")
         print(f"[package] {result}")
         print(f"[install] sudo apt install {result}")
-        print(f"[launch] {PACKAGE}")
+        print(f"[launch] {PRODUCT_SLUG}")
 
 
 def main():

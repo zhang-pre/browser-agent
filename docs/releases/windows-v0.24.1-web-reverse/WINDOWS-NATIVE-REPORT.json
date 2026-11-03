@@ -1,0 +1,132 @@
+{
+  "status": "passed",
+  "local_validation": true,
+  "installer_sha256": "703c2fcdc1e7db1e1d43b970e1ef29774f82e1cdd0585646616cda475ad2869f",
+  "setup_sha256": "178b289351651762b906cd016bc2ccee71fd8cd3a2520c87b3d03b2d041307df",
+  "installer_icon_sizes": [
+    "16x16",
+    "32x32",
+    "48x48",
+    "256x256"
+  ],
+  "file_properties": {
+    "installer": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "Web Reverse Installer",
+      "CompanyName": "Web Reverse",
+      "OriginalFilename": "web-reverse-setup.exe"
+    },
+    "setup.exe": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "Web Reverse Installer",
+      "CompanyName": "Web Reverse",
+      "OriginalFilename": "setup.exe"
+    },
+    "firefox.exe": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "Web Reverse",
+      "CompanyName": "Mozilla Corporation",
+      "OriginalFilename": "firefox.exe"
+    },
+    "private_browsing.exe": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "Web Reverse",
+      "CompanyName": "Mozilla Corporation",
+      "OriginalFilename": "private_browsing.exe"
+    },
+    "desktop-launcher/desktop-launcher.exe": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "",
+      "CompanyName": "Mozilla Foundation",
+      "OriginalFilename": "desktop-launcher.exe"
+    },
+    "uninstall/helper.exe": {
+      "ProductName": "Web Reverse",
+      "FileDescription": "Web Reverse Helper",
+      "CompanyName": "Web Reverse",
+      "OriginalFilename": "helper.exe"
+    }
+  },
+  "platform": "Windows",
+  "source_commit": "234a7d4e421b7fdb79ffc611246489bebb23aeb7",
+  "package_sha256": "7b154896aac9732baa746f6f05ef9c27836c9d27c65674e5e48c2318093b25c7",
+  "binary_sha256": "3680e9d574801c8736d9d40a9c26eb0632b897a942eb9a7806605c463751ba1f",
+  "screenshot_exit_code": 0,
+  "screenshot_sha256": "deba87090bb41be8326c422b65249472660f95c307ed29c219d345d1f93bc200",
+  "screenshot_size": 7281,
+  "runtime_build_id": "20261031120104",
+  "ledger_passed": true,
+  "ledger_checks": [
+    "Web Reverse brand",
+    "rendered sidebar title",
+    "roundtrip",
+    "dedup",
+    "scope",
+    "retention",
+    "allowlist",
+    "auto-continue",
+    "bundled-node",
+    "bundled-npm",
+    "bundled-python",
+    "bundled-pip",
+    "workspace-import",
+    "script-sibling-import"
+  ],
+  "bundled_runtimes": {
+    "node": "v24.22.2",
+    "npm": "11.19.1",
+    "python": "3.14.10",
+    "pip": "26.2.2",
+    "local": 42
+  },
+  "ledger_exit_code": 0,
+  "product_compatibility": [
+    {
+      "passed": true,
+      "phase": "initial",
+      "checks": [
+        "isolated-profile",
+        "compiled-brand",
+        "native-preferences",
+        "legacy-preference-and-restart",
+        "legacy-model-profile",
+        "legacy-conversation-read",
+        "portable-export",
+        "legacy-portable-import",
+        "native-file-roundtrip",
+        "native-node-execution",
+        "native-python-execution",
+        "compiled-tool-registration",
+        "isolated-environment-create",
+        "environment-list",
+        "native-page-navigation-and-evaluation",
+        "native-page-click",
+        "fixture-request",
+        "native-network-capture",
+        "compiled-sidebar-label",
+        "rendered-sidebar-title",
+        "native-agent-tool-loop",
+        "native-sqlite-roundtrip-and-restart",
+        "legacy-data-root-preserved"
+      ],
+      "buildId": "20261031120104"
+    },
+    {
+      "passed": true,
+      "phase": "restart",
+      "checks": [
+        "isolated-profile",
+        "compiled-brand",
+        "native-preferences",
+        "legacy-preference-and-restart",
+        "legacy-model-profile",
+        "legacy-conversation-read",
+        "model-profile-restart-persistence",
+        "conversation-restart-persistence",
+        "native-sqlite-roundtrip-and-restart",
+        "legacy-data-root-preserved"
+      ],
+      "buildId": "20261031120104"
+    }
+  ]
+}

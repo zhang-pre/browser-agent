@@ -1,12 +1,12 @@
 <div align="center">
 
-# browser-agent-mcp
+# Web Reverse
 
 **面向网页算法分析的 Firefox 内置 Agent 与隔离环境工具链**
 
 从浏览器内核观测、网络请求定位到 Node.js / Python 独立实现，项目将分析、验证和交付串成一条可持续执行的工作流；同时提供按 profile 与进程隔离的浏览器环境管理能力。
 
-[项目仓库](https://github.com/zhang-pre/browser-agent-mcp) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#内置工具) · [源码构建](#源码构建) · [第三方 MCP 接入](docs/mcp-client.md)
+[项目仓库](https://github.com/zhang-pre/browser-agent) · [快速开始](#快速开始) · [协作方式](#worker--director-协作) · [工具清单](#内置工具) · [源码构建](#源码构建) · [第三方 MCP 接入](docs/mcp-client.md)
 
 </div>
 
@@ -16,7 +16,7 @@
 
 网页请求中的 sign、token、设备特征或风控字段，往往不是固定值，而是由混淆 JavaScript、JSVMP 字节码、WASM 模块以及浏览器状态共同计算。要把这类请求迁移到浏览器之外，分析者不仅要找到生成入口，还需要复原运行上下文，并用真实接口响应验证结果。
 
-browser-agent-mcp 将这些环节放进 Firefox 侧边栏中的常驻 Agent。它可以连续完成网络流量记录、代码检索、内核探针观测、运行环境重建、脚本生成和接口回放，最终产出能够在 Node.js 或 Python 中独立执行的实现。
+Web Reverse 将这些环节放进 Firefox 侧边栏中的常驻 Agent。它可以连续完成网络流量记录、代码检索、内核探针观测、运行环境重建、脚本生成和接口回放，最终产出能够在 Node.js 或 Python 中独立执行的实现。
 
 项目还包含指纹环境管理器。每个环境绑定自己的 Firefox profile、浏览器进程与 Marionette 端口，Cookie、缓存、站点存储和配置分别持久化；创建、导入、编辑、启动和销毁均可从侧边栏或工具接口完成。
 
@@ -40,7 +40,7 @@ browser-agent-mcp 将这些环节放进 Firefox 侧边栏中的常驻 Agent。�
 
 ### 1. 打开侧边栏
 
-启动浏览器，点击右上角的 browser-agent-mcp 星光入口。若入口未显示，先通过地址栏附近的侧栏按钮展开浏览器侧栏。
+启动浏览器，点击右上角的 Web Reverse 星光入口。若入口未显示，先通过地址栏附近的侧栏按钮展开浏览器侧栏。
 
 ### 2. 建立模型配置
 
@@ -89,7 +89,7 @@ ChatGPT 订阅登录无需填写 API Key，请参阅 [Pi provider 分析与接�
 
 在双模型方案中，便宜且稳定的 worker 承担页面操作、网络读取、代码搜索和脚本执行；能力更强的 director 只消费阶段摘要，负责判断路线、发现偏航并下达下一阶段目标。这样可以把高频工具调用留给低成本模型，同时保留强模型在关键决策上的优势。
 
-配套 MCP 项目使用同一品牌与仓库地址：[browser-agent-mcp](https://github.com/zhang-pre/browser-agent-mcp)。接入后，director 可以检查运行状态、创建工作目录、选择 AI 辅助模式、启动会话、读取阶段结果并继续派发方向。
+配套 MCP 项目为：[browser-agent-mcp](https://github.com/zhang-pre/browser-agent-mcp)。接入后，director 可以检查运行状态、创建工作目录、选择 AI 辅助模式、启动会话、读取阶段结果并继续派发方向。
 
 长工具循环中的 worker 建议选择标准或快速档，例如 deepseek-v4-flash。推理档在连续工具调用场景中可能退化为只输出计划而不继续执行，因而更适合担任 director，而不是承担高频操作。
 
@@ -139,6 +139,8 @@ JSVMP 路线提供指令记录、派发器拆分、字节解码和离线反汇�
 
 仓库保存的是应用到 Firefox 源码树上的增量内容，主要代码位于 <code>additions/</code>。以下命令在仓库根目录的 Bash 环境运行，需要 Node.js/npm、Python 3、Git 和 rsync。首次构建先打包 React，再准备锁定版本的 Firefox 源码并接入原生追踪：
 
+Rust 通过根目录的 `rust-toolchain.toml` 固定为 1.97.0，由 rustup 在本项目内选择。锁定的 Firefox 配置在 Rust 1.98 的新增 Linux target 下会报 `Don't know how to translate x86_64-pc-linux-gnu for rustc`；使用项目工具链即可，无需修改全局默认版本或清理对象目录。
+
 ~~~bash
 npm --prefix additions/browser/components/agent-sidebar install
 npm --prefix additions/browser/components/agent-sidebar run build
@@ -165,6 +167,8 @@ cd upstream
 ~~~
 
 修改 C++、WebIDL 或构建注册时使用完整 `./mach build`；修改接入脚本后还需对源码树执行对应脚本。不要在已打补丁的树上重复运行 `apply-patches.sh`，其 `git apply --index` 不保证重复应用成功。构建与平台限制见 [架构](docs/architecture.md)、[发布流程](docs/distribution.md)；测试入口见 [测试说明](tests/README.md)。
+
+修改浏览器品牌或 configure 配置后，也应执行常规 `./mach build` 再打包，可继续复用原对象目录。开发 profile 默认保存在对象目录中；执行 `make clean`、`mach clobber` 或删除对象目录前，必须退出浏览器并将完整数据备份到构建树之外，详见 [改名与已有数据](docs/distribution.md#改名与已有数据)。
 
 主要维护区域：
 
@@ -203,39 +207,39 @@ cd upstream
 ## 模块边界
 
 ~~~text
-┌──────────────────────────── browser-agent-mcp ────────────────────────────┐
-│                                                                           │
-│  React 侧边栏                                                             │
-│  ├─ 会话、模式、工作目录与流式状态                                        │
-│  ├─ 指纹环境列表、配置编辑与进程状态                                      │
-│  └─ Provider、模型与显示偏好                                              │
-│                                                                           │
-│  Firefox Host                                                             │
-│  ├─ AgentSession：进程级入口                                              │
-│  └─ FirefoxAgentRuntimeHost：特权能力、生命周期与上下文适配                │
-│                                                                           │
-│  Agent Runtime                                                            │
-│  ├─ AgentRuntimeCore：状态、订阅、确认、取消与线程认领                    │
-│  ├─ AgentTurnOrchestrator：单轮编排、持久化、上下文与自动续跑             │
-│  ├─ AgentLoop：模型调用与工具执行闭环                                     │
-│  └─ UnifiedContext / UnifiedTurnContext：统一日志、任务目标与压缩预算     │
-│                                                                           │
-│  LLM Stack                                                                │
-│  ├─ LlmClient / LlmProtocol：稳定入口与协议转换                           │
-│  ├─ LlmStreamParser：SSE、文本、推理与工具参数增量                        │
-│  └─ LlmRequestExecutor / LlmTransport：请求、超时、重试与宿主网络         │
-│                                                                           │
-│  ToolRouter + Backends                                                    │
-│  ├─ 页面、网络、源码、文件、Cookie、扩展、Skills 与记忆                   │
-│  ├─ 环境管理、WebAPI、JSVMP、WASM 与白盒诊断                             │
-│  └─ MCP Manager / FirefoxMcpService：第三方工具、资源、提示词与授权       │
-│                                                                           │
-│  Gecko / SpiderMonkey                                                     │
-│  ├─ FrxFingerprintConfig：进程启动阶段加载指纹配置                        │
-│  ├─ JSVMP 与通用 JavaScript 执行轨迹                                     │
-│  ├─ DOM/WebAPI binding 边界记录                                           │
-│  └─ 浏览器真值与本地实现的控制流对照                                      │
-└───────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────── Web Reverse ────────────────────────────
+│                                                                       
+│  React 侧边栏                                                          
+│  ├─ 会话、模式、工作目录与流式状态                                      
+│  ├─ 指纹环境列表、配置编辑与进程状态                                      
+│  └─ Provider、模型与显示偏好                                              
+│                                                                           
+│  Firefox Host                                                             
+│  ├─ AgentSession：进程级入口                                              
+│  └─ FirefoxAgentRuntimeHost：特权能力、生命周期与上下文适配                
+│                                                                           
+│  Agent Runtime                                                           
+│  ├─ AgentRuntimeCore：状态、订阅、确认、取消与线程认领                    
+│  ├─ AgentTurnOrchestrator：单轮编排、持久化、上下文与自动续跑             
+│  ├─ AgentLoop：模型调用与工具执行闭环                                     
+│  └─ UnifiedContext / UnifiedTurnContext：统一日志、任务目标与压缩预算     
+│                                                                           
+│  LLM Stack                                                                
+│  ├─ LlmClient / LlmProtocol：稳定入口与协议转换                           
+│  ├─ LlmStreamParser：SSE、文本、推理与工具参数增量                        
+│  └─ LlmRequestExecutor / LlmTransport：请求、超时、重试与宿主网络         
+│                                                                           
+│  ToolRouter + Backends                                                    
+│  ├─ 页面、网络、源码、文件、Cookie、扩展、Skills 与记忆                   
+│  ├─ 环境管理、WebAPI、JSVMP、WASM 与白盒诊断                             
+│  └─ MCP Manager / FirefoxMcpService：第三方工具、资源、提示词与授权       
+│                                                                           
+│  Gecko / SpiderMonkey                                                     
+│  ├─ FrxFingerprintConfig：进程启动阶段加载指纹配置                          
+│  ├─ JSVMP 与通用 JavaScript 执行轨迹                                       
+│  ├─ DOM/WebAPI binding 边界记录                                            
+│  └─ 浏览器真值与本地实现的控制流对照                                         
+└──────────────────────────────────────────────────────────────────────
 ~~~
 
 最终交付通常包含两类结果：一套能够重复启动和管理的隔离浏览器环境，以及一份经过真实接口验证、可以脱离浏览器运行的 Node.js 或 Python 实现。

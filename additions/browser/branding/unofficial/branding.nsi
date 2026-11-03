@@ -9,8 +9,8 @@
 # BrandFullNameInternal is used for some registry and file system values
 # instead of BrandFullName and typically should not be modified.
 !define BrandFullNameInternal "Firefox Reverse"
-!define BrandFullName         "Firefox Reverse"
-!define CompanyName           "Browser Agent MCP"
+!define BrandFullName         "Web Reverse"
+!define CompanyName           "Web Reverse"
 !define URLInfoAbout          "https://github.com/zhang-pre/browser-agent"
 !define HelpLink              "https://github.com/zhang-pre/browser-agent/issues"
 

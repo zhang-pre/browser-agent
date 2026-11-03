@@ -213,7 +213,7 @@ export class SkillRegistry {
     const map = new Map();
     map.set(BUILTIN_NAME, {
       name: BUILTIN_NAME,
-      description: "Firefox Reverse 内置的 JS 逆向、签名定位、补环境与实打验证方法论",
+      description: "Web Reverse 内置的 JS 逆向、签名定位、补环境与实打验证方法论",
       source: "builtin",
       url: BUILTIN_URL,
     });
@@ -310,7 +310,7 @@ export class SkillRegistry {
       const descriptor = legacyDefault || builtinAlias
         ? {
             name: BUILTIN_NAME,
-            description: "Firefox Reverse 内置的 JS 逆向、签名定位、补环境与实打验证方法论",
+            description: "Web Reverse 内置的 JS 逆向、签名定位、补环境与实打验证方法论",
             source: "builtin",
             url: BUILTIN_URL,
           }

@@ -922,7 +922,7 @@ function toolTable() {
     // ───────── 环境管理（backend: env；一个环境一个 profile + 独立进程）─────────
     T(
       "env_current",
-      "返回当前 Firefox Reverse 进程所属的环境。如果浏览器不是从环境打开，则 environment 为 null。",
+      "返回当前 Web Reverse 进程所属的环境。如果浏览器不是从环境打开，则 environment 为 null。",
       {
         type: "object",
         properties: {
@@ -934,7 +934,7 @@ function toolTable() {
     ),
     T(
       "env_current_process",
-      "返回当前主进程的指纹配置状态。普通启动时它不是环境列表的一行；保存主进程配置后需重启 Firefox Reverse 生效。",
+      "返回当前主进程的指纹配置状态。普通启动时它不是环境列表的一行；保存主进程配置后需重启 Web Reverse 生效。",
       {
         type: "object",
         properties: {
@@ -1110,7 +1110,7 @@ function toolTable() {
     ),
     T(
       "env_generate_fingerprint",
-      "为已有环境重新生成 Firefox fingerprint.json，默认保留该环境当前的一致性策略。浏览器版本和系统匹配 Firefox Reverse；默认中国大陆简体中文，可自定义语言、地区和时区。",
+      "为已有环境重新生成 Firefox fingerprint.json，默认保留该环境当前的一致性策略。浏览器版本和系统匹配 Web Reverse；默认中国大陆简体中文，可自定义语言、地区和时区。",
       {
         type: "object",
         properties: {
@@ -1138,7 +1138,7 @@ function toolTable() {
     ),
     T(
       "env_capture_fingerprint",
-      "采集当前 Firefox Reverse JS 可见指纹并写入该环境 captures/*.json。",
+      "采集当前 Web Reverse JS 可见指纹并写入该环境 captures/*.json。",
       {
         type: "object",
         properties: {

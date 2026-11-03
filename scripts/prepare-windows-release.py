@@ -41,6 +41,8 @@ def verify(archive):
             raise ValueError("Expected an x86_64 PE executable")
         ini = configparser.ConfigParser()
         ini.read_string(package.read("firefox/application.ini").decode("utf-8"))
+        if ini["App"].get("CodeName") != "Web Reverse":
+            raise ValueError("Stale Windows application display name")
         build = ini["App"]["BuildID"]
         if not re.fullmatch(r"[0-9]{14}", build):
             raise ValueError("Invalid BuildID")
@@ -58,6 +60,12 @@ def verify(archive):
                     raise ValueError(f"Stale module in package: {relative}")
             if omni.read("chrome/browser/content/branding/about-logo.png") != (ROOT / "additions/browser/branding/unofficial/content/about-logo.png").read_bytes():
                 raise ValueError("Stale browser logo")
+            brand = omni.read("chrome/en-US/locale/branding/brand.properties").decode("utf-8")
+            if not re.search(r"^brandFullName=Web Reverse\r?$", brand, re.MULTILINE):
+                raise ValueError("Stale Windows browser brand")
+            sidebar = omni.read("chrome/browser/content/browser/agent-sidebar/agent-sidebar.bundle.js").decode("utf-8")
+            if "Web Reverse" not in sidebar or "browser-agent-Agent" in sidebar:
+                raise ValueError("Stale Windows sidebar title")
         runtimes = json.loads(package.read("firefox/runtimes/MANIFEST.json"))
         if runtimes != json.loads((ROOT / "configs/windows-runtimes.json").read_text()):
             raise ValueError("Runtime versions do not match the pinned manifest")
@@ -73,12 +81,14 @@ def prepare(archive, installer, output, native_report=None):
     if report and (report.get("status") != "passed" or report.get("package_sha256") != sha(archive)
                    or report.get("runtime_build_id") != app["buildid"]):
         raise ValueError("Native report does not verify this exact candidate")
+    if report and report.get("installer_sha256") and report["installer_sha256"] != sha(installer):
+        raise ValueError("Native report does not verify this exact installer")
     version = json.loads((ROOT / "additions/browser/components/agent-sidebar/package.json").read_text())["version"]
     with installer.open("rb") as stream:
         if stream.read(2) != b"MZ":
             raise ValueError("Installer is not a Windows executable")
     output.mkdir(parents=True, exist_ok=True)
-    prefix = f"browser-agent-v{version}-windows-x86_64"
+    prefix = f"web-reverse-v{version}-windows-x86_64"
     for source, extension in [(archive, ".zip"), (installer, ".exe")]:
         target = output / (prefix + extension)
         if source.resolve() != target.resolve():
@@ -86,7 +96,7 @@ def prepare(archive, installer, output, native_report=None):
 
     patch = git("diff", "--binary", "HEAD")
     for name in git("ls-files", "--others", "--exclude-standard", "-z").decode().split("\0"):
-        if name.startswith(("additions/", "configs/", "scripts/", "docs/", "tests/")) and (ROOT / name).is_file():
+        if (name.startswith(("additions/", "configs/", "scripts/", "docs/", "tests/")) or name == "rust-toolchain.toml") and (ROOT / name).is_file():
             patch += git("diff", "--no-index", "--binary", "--", "/dev/null", name, check=False)
     if patch:
         (output / "SOURCE-CHANGES.patch").write_bytes(patch)
@@ -99,23 +109,25 @@ def prepare(archive, installer, output, native_report=None):
         "source_base_commit": git("rev-parse", "HEAD").decode().strip(),
         "source_modified": bool(patch),
         "upstream_commit": subprocess.check_output(["git", "-C", str(ROOT / "upstream"), "rev-parse", "HEAD"], text=True).strip(),
-        "checks": ["ZIP integrity", "PE x86_64", "BuildID", "VC runtime DLLs", "current AgentLoop and backend modules", "current browser logo", "pinned bundled runtimes"],
+        "checks": ["ZIP integrity", "PE x86_64", "BuildID", "VC runtime DLLs", "current AgentLoop and backend modules", "Web Reverse application/browser/sidebar branding", "current browser logo", "pinned bundled runtimes"],
         "native_windows_validation": "passed" if report else "pending",
+        "installer_sha256": sha(installer),
         "runtimes": json.loads((ROOT / "configs/windows-runtimes.json").read_text()),
     }
     if report:
         (output / "WINDOWS-NATIVE-REPORT.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (output / "BUILD-INFO.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     validation = "已通过本机原生 Windows 启动与运行时验证，详情见 WINDOWS-NATIVE-REPORT.json。" if report else "GitHub 发布前应完成原生 Windows 启动验证。"
-    (output / "README-WINDOWS.md").write_text(f"""# Browser Agent MCP / Firefox Reverse v{version}
+    (output / "README-WINDOWS.md").write_text(f"""# Web Reverse v{version}
 
 适用于 Windows 10/11 x64。无需编译源码。
 
-- 安装版：运行 `{prefix}.exe`，按向导安装，然后从开始菜单启动 Firefox Reverse。
+- 安装版：运行 `{prefix}.exe`，按向导安装，然后从开始菜单启动 Web Reverse。
 - 便携版：解压 `{prefix}.zip`，保留完整 firefox 目录，运行 firefox.exe。
 - 首次使用：打开 Agent 侧栏，在设置中配置模型 Provider、API Key 或支持的订阅登录。
 - 已内置 VC 运行库、Node.js/npm、Python/pip，Agent 自动识别，无需另装运行时或设置系统 PATH。
 - Python 额外依赖默认安装到当前工作目录的 .python-packages，避免写入应用安装目录。
+- 界面、开始菜单和“已安装的应用”显示 Web Reverse；旧版的内部注册标识和安装位置保留，以继续使用原 profile 与升级记录。
 - 此候选版包含新图标和全自动模式续跑修复，尚未进行数字签名。
 - 沿用项目 Phase B 原生追踪配置：Windows 内容进程沙箱会关闭，以允许追踪写入临时文件；这是专用分析浏览器的构建取舍。
 

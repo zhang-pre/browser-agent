@@ -1,0 +1,5 @@
+# Keep the pinned Firefox configure compatible with Rust's target list.
+# Rust 1.98 adds x86_64-oe-linux-gnu, making x86_64-pc-linux-gnu ambiguous.
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"

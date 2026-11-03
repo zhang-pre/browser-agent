@@ -97,7 +97,7 @@ def validate(report, output):
     assert re.fullmatch(r"[0-9]{14}", build_id)
     assert re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*", locale)
     assert re.fullmatch(r"[0-9a-f]{64}", package_sha)
-    package = Path("candidate") / f"browser-agent-{tag}-windows-x86_64.zip"
+    package = Path("candidate") / f"web-reverse-{tag}-windows-x86_64.zip"
     assert sha(package) == package_sha
     report.update(platform="Windows", source_commit=commit, package_sha256=package_sha)
     with temporary_workspace() as work:
@@ -117,6 +117,7 @@ def validate(report, output):
         ini.read(root / "application.ini", encoding="utf-8")
         assert ini["App"]["BuildID"] == build_id
         assert ini["App"]["SourceStamp"] == commit
+        assert ini["App"]["CodeName"] == "Web Reverse"
         expected_ledger = subprocess.check_output([
             "git", "show", f"{commit}:additions/browser/components/agent-sidebar/modules/backends/LedgerBackend.sys.mjs"
         ])
@@ -137,7 +138,7 @@ def validate(report, output):
                 process = subprocess.Popen([
                     str(executable), "--headless", "--no-remote", "--no-deelevate", "--wait-for-browser", "--profile", str(profile),
                     "--screenshot", str(screenshot),
-                    "data:text/html,%3Cbody%3EFirefox%20Reverse%20native%20validation%3C/body%3E"
+                    "data:text/html,%3Cbody%3EWeb%20Reverse%20native%20validation%3C/body%3E"
                 ], stdout=log, stderr=log)
                 report["screenshot_exit_code"] = process.wait(timeout=90)
             assert report["screenshot_exit_code"] == 0
@@ -180,6 +181,8 @@ def validate(report, output):
                     const done=arguments[arguments.length-1];
                     const expectedRuntimes=arguments[0];
                     (async()=>{
+                      const brand=Services.strings.createBundle('chrome://branding/locale/brand.properties');
+                      if(brand.GetStringFromName('brandFullName')!=='Web Reverse')throw new Error('stale Windows brand');
                       const {LedgerBackend}=ChromeUtils.importESModule('resource:///modules/agentsidebar/backends/LedgerBackend.sys.mjs');
                       const ledger=new LedgerBackend();
                       const workspace=PathUtils.join(PathUtils.profileDir,'native-ledger');
@@ -235,7 +238,17 @@ def validate(report, output):
                       await IOUtils.writeUTF8(PathUtils.join(scripts,'check.py'),'import sibling_helper; print(sibling_helper.value)\n');
                       const sibling=await runner.runPython({file:'子目录 scripts/check.py'},ctx);
                       if(!sibling.ok||sibling.output.trim()!=='43')throw new Error('script sibling import failed');
-                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.browser-agent.version'),runtimes:{node:nr.output.trim(),npm:np.output.trim(),...python},checks:['roundtrip','dedup','scope','retention','allowlist','auto-continue','bundled-node','bundled-npm','bundled-python','bundled-pip','workspace-import','script-sibling-import']};
+                      const win=Services.wm.getMostRecentWindow('navigator:browser');
+                      await win.SidebarController.show('viewAgentSidebar');
+                      let sidebarTitle='';
+                      for(let i=0;i<100;i++){
+                        const sidebar=win.SidebarController.browser||win.document.getElementById('sidebar');
+                        sidebarTitle=sidebar?.contentDocument?.querySelector('.agent-panel__title')?.textContent?.trim()||'';
+                        if(sidebarTitle==='Web Reverse')break;
+                        await new Promise(resolve=>win.setTimeout(resolve,100));
+                      }
+                      if(sidebarTitle!=='Web Reverse')throw new Error('stale Windows sidebar title: '+sidebarTitle);
+                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.browser-agent.version'),runtimes:{node:nr.output.trim(),npm:np.output.trim(),...python},checks:['Web Reverse brand','rendered sidebar title','roundtrip','dedup','scope','retention','allowlist','auto-continue','bundled-node','bundled-npm','bundled-python','bundled-pip','workspace-import','script-sibling-import']};
                     })().then(done,e=>done({error:String(e),stack:e?.stack}));
                     """, "args": [expected_runtimes], "newSandbox": False, "scriptTimeout": 60000,
                 })

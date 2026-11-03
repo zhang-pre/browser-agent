@@ -195,7 +195,7 @@ const EXTERNAL_CAPTURE_SCRIPT = String.raw`(() => {
     }
   } catch {}
   console.log("FRX_CAPTURE_JSON_START\n" + json + "\nFRX_CAPTURE_JSON_END");
-  prompt("Firefox Reverse 指纹采集 JSON：复制完整 JSON 后粘贴到环境管理的“导入”页签。也可在控制台执行 copy(window.__FRX_CAPTURE_JSON__)", json);
+  prompt("Web Reverse 指纹采集 JSON：复制完整 JSON 后粘贴到环境管理的“导入”页签。也可在控制台执行 copy(window.__FRX_CAPTURE_JSON__)", json);
   return json;
 })()`;
 
@@ -669,7 +669,7 @@ export default function EnvironmentPane({ env, onClose }) {
 
   async function promptCurrentProcessRestart(doneText, keptText) {
     window.alert(
-      `${doneText}\n\n这个修改已经写入当前 profile，后续手动启动 Firefox Reverse 都会使用这套当前主进程配置。\n\n请你手动退出并重新打开 Firefox Reverse 后生效。`
+      `${doneText}\n\n这个修改已经写入当前 profile，后续手动启动 Web Reverse 都会使用这套当前主进程配置。\n\n请你手动退出并重新打开 Web Reverse 后生效。`
     );
     setNotice(keptText || `${doneText}，已记住；手动重启后生效`);
   }
@@ -829,7 +829,7 @@ export default function EnvironmentPane({ env, onClose }) {
     if (!currentApi) {
       return;
     }
-    if (!window.confirm("一键还原默认会取消当前主进程指纹配置，并清理当前 profile 里由环境管理写入的相关 prefs。后续手动启动将恢复 Firefox Reverse 默认指纹。继续？")) {
+    if (!window.confirm("一键还原默认会取消当前主进程指纹配置，并清理当前 profile 里由环境管理写入的相关 prefs。后续手动启动将恢复 Web Reverse 默认指纹。继续？")) {
       return;
     }
     setBusy(true);

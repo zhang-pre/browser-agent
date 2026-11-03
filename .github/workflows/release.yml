@@ -1,4 +1,4 @@
-# browser-agent · 自动编译 + 发布到 Releases
+# Web Reverse · 自动编译 + 发布到 Releases
 #
 # 触发：仅手动 workflow_dispatch。正式多端包先在 SSH 编译机验证，再决定是否运行本工作流；
 # 普通打 tag 不再自动创建一个与手工 Release 重复的草稿。
@@ -28,7 +28,7 @@ permissions:
   contents: write
 
 env:
-  # Firefox Reverse is intentionally pinned. Building arbitrary mozilla/main
+  # Web Reverse is intentionally pinned. Building arbitrary mozilla/main
   # revisions can silently change Marionette and internal Gecko contracts.
   FIREFOX_REV: cebc55aab4d2661d1f6c2d1526362947ec4016c1
   MOZ_SOURCE_REPO: https://github.com/${{ github.repository }}
@@ -48,9 +48,9 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           draft: true
           prerelease: ${{ contains(steps.meta.outputs.tag, '-') }}
-          name: "browser-agent ${{ steps.meta.outputs.tag }}"
+          name: "Web Reverse ${{ steps.meta.outputs.tag }}"
           body: |
-            browser-agent ${{ steps.meta.outputs.tag }} —— 内置 AI 逆向 Agent 的 Firefox。
+            Web Reverse ${{ steps.meta.outputs.tag }} —— 内置 AI 逆向 Agent 的 Firefox。
             按系统下载安装包，使用说明见 README。
 
   # ── 2. 自托管 runner：增量构建 macOS arm64 / Intel DMG → 传 Release ──
@@ -96,10 +96,7 @@ jobs:
       - name: 同步全部 additions 到源码树（复用已 bootstrap 的树，增量编）
         run: |
           set -e
-          rsync -a \
-            --exclude node_modules --exclude dev --exclude README.md \
-            --exclude '*.jsx' --exclude 'package*.json' --exclude .gitignore \
-            "$GITHUB_WORKSPACE/additions/" "$UPSTREAM/"
+          UPSTREAM_DIR="$UPSTREAM" bash "$GITHUB_WORKSPACE/scripts/sync-additions.sh"
           node "$GITHUB_WORKSPACE/scripts/check-branding-assets.mjs" "$UPSTREAM"
 
       - name: mach build + package（${{ matrix.arch }}）
@@ -129,7 +126,7 @@ jobs:
           test -n "$executable"
           file "$executable" | grep -F '${{ matrix.file_marker }}'
           source_dmg=$(ls "$obj"/dist/firefox-*.mac.dmg | head -1)
-          output="$GITHUB_WORKSPACE/browser-agent-${{ needs.create-release.outputs.tag }}-macos-${{ matrix.asset_arch }}.dmg"
+          output="$GITHUB_WORKSPACE/web-reverse-${{ needs.create-release.outputs.tag }}-macos-${{ matrix.asset_arch }}.dmg"
           cp "$source_dmg" "$output"
           echo "path=$output" >> "$GITHUB_OUTPUT"
           echo "dmg: $output"
@@ -188,6 +185,7 @@ jobs:
             done
           done
           cp -R browser-agent/additions/. upstream/
+          python browser-agent/scripts/apply-product-branding.py upstream
           python browser-agent/scripts/apply-fingerprint-config.py upstream
           node browser-agent/scripts/check-branding-assets.mjs upstream
       - name: bootstrap + build + package
