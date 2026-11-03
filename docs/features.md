@@ -1,6 +1,6 @@
 # 功能清单
 
-本页描述当前实现；完整内置工具名见 [README](../README.md#内置工具)，参数契约以 [Tools.sys.mjs](../additions/browser/components/agent-sidebar/modules/tools/Tools.sys.mjs) 为准。
+本页描述当前实现；完整内置工具名见 [内置工具清单](tools.md)，参数契约以 [Tools.sys.mjs](../additions/browser/components/agent-sidebar/modules/tools/Tools.sys.mjs) 为准。
 
 ## Agent 与模型
 
@@ -43,7 +43,7 @@
 
 ## 本地工作与记忆
 
-- 文件工具按会话工作目录解析路径，脚本工具调用本机 Node/Python，npm 安装用于补充分析依赖。
+- 文件工具按会话工作目录解析路径，脚本工具调用 Node/Python（Windows 发行包已内置运行时），npm 安装用于补充分析依赖。
 - `skill_list / skill_get / skill_read_resource` 发现和按需读取内置、用户或工作区 Skill。
 - `remember / recall` 是统一记忆入口；支持事实、假设、失败条件、决策、产物与观察，携带状态和证据。默认检索当前工作目录，跨目录需显式指定范围。
 - `notes_add / notes_get` 已移除；旧 `.frx-notes.ndjson` 保留但不读取或迁移。压缩交接和完成兜底使用统一证据契约，不把未经验证的推断升级成事实。

@@ -1,5 +1,9 @@
 # 构建产物与发布
 
+## 直接下载 Windows 体验版
+
+[Web Reverse v0.24.1 Windows x64](https://github.com/zhang-pre/browser-agent/releases/tag/v0.24.1-web-reverse) 已提供 [EXE 安装版](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.exe) 和 [ZIP 便携版](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.zip)。无需自行编译；安装与首次配置见 [快速开始](../README.md#快速开始)。这是手动发布的已验证构建，完整记录见 [Windows 版本记录](releases/windows-v0.24.1-web-reverse/README.md)。
+
 发布自动化位于本仓库 [release.yml](../.github/workflows/release.yml)，不要求另取私有 build 仓库。工作流是实现事实；仓库当前可见性和某个 Release 是否已发布不能从源码判断。
 
 ## 发布工作流

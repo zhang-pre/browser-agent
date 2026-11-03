@@ -2,7 +2,9 @@
 
 生成日期：2026-10-31。平台：Windows x64。BuildID：`20261031120104`（UTC）。浏览器引擎版本：`153.0a1`。
 
-产物位于 `dist/windows/20261031120104/`。此目录记录本地候选包的构建和验证结果；尚未上传 GitHub。
+产物位于 `dist/windows/20261031120104/`。此目录记录构建与验证结果；已于 2026-11-03 以 Windows 体验版发布到 [GitHub Release v0.24.1-web-reverse](https://github.com/zhang-pre/browser-agent/releases/tag/v0.24.1-web-reverse)。
+
+直接下载：[EXE 安装包](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.exe) · [ZIP 便携包](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.zip) · [SHA256SUMS](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/SHA256SUMS)。发布附件中的校验清单只包含公开附件；本地用户数据复核记录不随包发布。
 
 | 文件 | 大小（字节） | SHA256 |
 | --- | ---: | --- |

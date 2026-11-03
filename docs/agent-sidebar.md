@@ -52,6 +52,6 @@ cd upstream
 
 此流程用于已完成上游接入的 JS/资源迭代；首次与原生代码构建见 [README](../README.md#源码构建)。`npm run watch` 可在侧栏源码目录持续打包，随后仍需同步和构建。
 
-Firefox 模块运行宿主命令使用 `Subprocess.sys.mjs`，不使用 Node `child_process`。Node/Python/npm 使用本机安装，路径可在设置中配置。`fs_*` 的目录约束不把子进程变成系统沙箱。
+Firefox 模块运行宿主命令使用 `Subprocess.sys.mjs`，不使用 Node `child_process`。Windows 发行包自带 Node.js/npm 和 Python/pip；其他构建可使用本机安装的运行时，路径可在设置中配置。`fs_*` 的目录约束不把子进程变成系统沙箱。
 
 当前回归入口见 [tests/README.md](../tests/README.md)；详细依赖边界见 [模块目录](../additions/browser/components/agent-sidebar/modules/README.md)。
