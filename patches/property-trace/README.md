@@ -1,27 +1,9 @@
-# patches/property-trace/
+# WebAPI / 属性观测
 
-DOM API getter/setter 调用追踪。**思路与 camoufox-reverse PropertyTracer 一致**，但范围扩大，且基于原生 mozilla-firefox/firefox 重新实现（不基于 camoufox fork）。
+已实现能力名为 WebAPI trace：`additions/dom/bindings/WebApiTraceCore.cpp/.h`，由 `scripts/apply-phase-b.py` 修改 WebIDL `Codegen.py` 与相关 include/build 清单接入。本目录没有独立 `.patch`。
 
-## 关键 Firefox 源文件
+生成器在符合条件的非静态 method/getter 函数体中注入 RAII 记录，使用 `AutoTraceMethod` / `AutoTraceGetter` 采集接口成员、输入/返回等信息。不能把它表述为任意 JS 对象属性或所有 setter 的追踪。
 
-- 由 `dom/bindings/Codegen.py` 自动生成的 binding 代码（如 `obj-*/dom/bindings/NavigatorBinding.cpp`）
-- 在生成器中插入 trace hook，对所有 DOM API getter/setter 统一插桩
+Agent 通过 `WebApiBackend` 的 `webapi_trace / webapi_query` 控制与查询，可输出环境依赖清单及流程。默认 NDJSON 基路径为 `/tmp/browser-agent-webapi.ndjson`，按 PID 后缀分文件；Windows 使用 TEMP/TMP，环境启动可覆盖输出基路径。查询结果可落入会话工作目录的 `webapi/`。
 
-## 覆盖范围
-
-详见 [../../docs/features.md#6-属性追踪property-trace](../../docs/features.md)。
-
-## 数据流
-
-```
-DOM getter/setter
-   ↓ (auto-generated trace hook from Codegen.py)
-TraceWriter
-   ↓
-NDJSON file (settings.trace.property_dir)
-```
-
-## 与 camoufox-reverse 复用
-
-- 算法/数据结构可借鉴 camoufox-reverse 中的 `PropertyTracer` 实现。
-- 但因为 fork 基础不同（一个是 camoufox，一个是上游 firefox），补丁文件不能直接 cherry-pick。
+先确认 Firefox 目标，开启后触发一次并用 `deep_health(engine="webapi")` 检查新增记录。设置成功或旧文件存在不证明本次观测有效。源码与构建边界见 [原生能力](../../docs/agent-native-capabilities.md)。

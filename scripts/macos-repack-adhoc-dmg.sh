@@ -67,7 +67,7 @@ rm -f "$output"
 echo "[macos-repack] create: $output"
 hdiutil create \
   -srcfolder "$stage_dir" \
-  -volname "Firefox Reverse" \
+  -volname "Web Reverse" \
   -format UDZO \
   -imagekey zlib-level=9 \
   -ov "$output" >/dev/null

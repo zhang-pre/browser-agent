@@ -30,7 +30,9 @@ def stop(process):
 
 @contextmanager
 def temporary_workspace():
-    work = Path(tempfile.mkdtemp(prefix="frx-native-"))
+    work = Path(tempfile.mkdtemp(prefix="frx-native-中文 path-")).resolve()
+    temporary_root = Path(tempfile.gettempdir()).resolve()
+    assert work.is_relative_to(temporary_root) and work.name.startswith("frx-native-")
     try:
         yield work
     finally:
@@ -88,12 +90,14 @@ def validate(report, output):
     tag = os.environ["RELEASE_TAG"]
     commit = os.environ["SOURCE_COMMIT"]
     build_id = os.environ["EXPECTED_BUILD_ID"]
+    locale = os.environ.get("EXPECTED_UI_LOCALE", "zh-CN")
     package_sha = os.environ["PACKAGE_SHA256"].lower()
     assert re.fullmatch(r"v[0-9][0-9A-Za-z.-]*", tag)
     assert re.fullmatch(r"[0-9a-f]{40}", commit)
     assert re.fullmatch(r"[0-9]{14}", build_id)
+    assert re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*", locale)
     assert re.fullmatch(r"[0-9a-f]{64}", package_sha)
-    package = Path("candidate") / f"browser-agent-{tag}-windows-x86_64.zip"
+    package = Path("candidate") / f"web-reverse-{tag}-windows-x86_64.zip"
     assert sha(package) == package_sha
     report.update(platform="Windows", source_commit=commit, package_sha256=package_sha)
     with temporary_workspace() as work:
@@ -106,17 +110,24 @@ def validate(report, output):
             archive.extractall(work)
         root = work / "firefox"
         executable = root / "firefox.exe"
+        for name in ["msvcp140.dll", "msvcp140_atomic_wait.dll", "vcruntime140.dll", "vcruntime140_1.dll"]:
+            assert (root / name).stat().st_size > 0, f"Missing browser runtime: {name}"
         report["binary_sha256"] = sha(executable)
         ini = configparser.ConfigParser()
         ini.read(root / "application.ini", encoding="utf-8")
         assert ini["App"]["BuildID"] == build_id
         assert ini["App"]["SourceStamp"] == commit
+        assert ini["App"]["CodeName"] == "Web Reverse"
         expected_ledger = subprocess.check_output([
             "git", "show", f"{commit}:additions/browser/components/agent-sidebar/modules/backends/LedgerBackend.sys.mjs"
         ])
         with zipfile.ZipFile(root / "browser/omni.ja") as archive:
             assert archive.read("modules/agentsidebar/backends/LedgerBackend.sys.mjs") == expected_ledger
-            assert "右击或下拉显示历史" in archive.read("localization/zh-CN/browser/browserContext.ftl").decode()
+            context_menu = archive.read(f"localization/{locale}/browser/browserContext.ftl").decode()
+            assert "main-context-menu-back" in context_menu
+            if locale == "zh-CN":
+                assert "右击或下拉显示历史" in context_menu
+        expected_runtimes = json.loads((root / "runtimes/MANIFEST.json").read_text(encoding="utf-8"))
 
         profile = work / "screenshot-profile"
         profile.mkdir()
@@ -127,7 +138,7 @@ def validate(report, output):
                 process = subprocess.Popen([
                     str(executable), "--headless", "--no-remote", "--no-deelevate", "--wait-for-browser", "--profile", str(profile),
                     "--screenshot", str(screenshot),
-                    "data:text/html,%3Cbody%3EFirefox%20Reverse%20native%20validation%3C/body%3E"
+                    "data:text/html,%3Cbody%3EWeb%20Reverse%20native%20validation%3C/body%3E"
                 ], stdout=log, stderr=log)
                 report["screenshot_exit_code"] = process.wait(timeout=90)
             assert report["screenshot_exit_code"] == 0
@@ -166,10 +177,13 @@ def validate(report, output):
                 wire.command("WebDriver:NewSession", {})
                 wire.command("Marionette:SetContext", {"value": "chrome"})
                 result = wire.command("WebDriver:ExecuteAsyncScript", {
-                    "script": """
+                    "script": r"""
                     const done=arguments[arguments.length-1];
+                    const expectedRuntimes=arguments[0];
                     (async()=>{
-                      const {LedgerBackend,ledgerScopeSql}=ChromeUtils.importESModule('resource:///modules/agentsidebar/backends/LedgerBackend.sys.mjs');
+                      const brand=Services.strings.createBundle('chrome://branding/locale/brand.properties');
+                      if(brand.GetStringFromName('brandFullName')!=='Web Reverse')throw new Error('stale Windows brand');
+                      const {LedgerBackend}=ChromeUtils.importESModule('resource:///modules/agentsidebar/backends/LedgerBackend.sys.mjs');
                       const ledger=new LedgerBackend();
                       const workspace=PathUtils.join(PathUtils.profileDir,'native-ledger');
                       await IOUtils.makeDirectory(workspace);
@@ -179,23 +193,70 @@ def validate(report, output):
                       const recall=await ledger.recall({query:'payload'},ctx);
                       if(recall.count!==1 || recall.results[0].text!==text)throw new Error('roundtrip failed');
                       const duplicate=await ledger.append({text},ctx);
-                      if(duplicate.dedupedOld!==1)throw new Error('dedup failed');
+                      if(duplicate.dedup!==1||duplicate.added!==0)throw new Error('dedup failed');
                       if((await ledger.recall({},{workspaceRoot:workspace+'-other'})).count!==0)throw new Error('scope leak');
-                      await ledger._addMany(Array.from({length:125},(_,i)=>({kind:'fact',text:'uniq'+i})),ctx);
-                      const db=await ledger._db();
-                      const count=(await db.execute('SELECT count(*) AS c FROM mem WHERE workspace=:w AND kind=:k',{w:workspace,k:'fact'}))[0].getResultByName('c');
-                      if(count!==120)throw new Error('cap failed');
-                      let rejected=false;try{ledgerScopeSql('site OR 1=1');}catch{rejected=true;}
+                      await ledger._addMany(Array.from({length:125},(_,i)=>({kind:'observation',text:'uniq'+i})),ctx);
+                      const count=(await ledger._contextRows(ctx)).filter(row=>row.kind==='observation').length;
+                      if(count!==125)throw new Error('retention failed');
+                      let rejected=false;try{await ledger.recall({scope:'site OR 1=1'},ctx);}catch(e){rejected=/invalid recall scope/.test(String(e));}
                       if(!rejected)throw new Error('allowlist failed');
-                      await db.close();
-                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.browser-agent.version'),checks:['roundtrip','dedup','scope','cap','allowlist']};
-                    })().then(done,e=>done({error:String(e)}));
-                    """, "args": [], "newSandbox": False, "scriptTimeout": 60000,
+                      await ledger.close();
+                      const {runAgentTurn}=ChromeUtils.importESModule('resource:///modules/agentsidebar/runtime/AgentLoop.sys.mjs');
+                      const {ToolRouter}=ChromeUtils.importESModule('resource:///modules/agentsidebar/tools/ToolRouter.sys.mjs');
+                      let rounds=0,actions=0;
+                      const router=new ToolRouter().register({name:'fs_read',handler:()=>{actions++;return {value:42};}});
+                      const loop=await runAgentTurn({router,maxRounds:6,
+                        messages:[{role:'user',content:'Inspect the target file and verify the result.'}],
+                        client:{chat:async()=>{
+                          rounds++;
+                          if(rounds===1)return {content:'I will inspect the target file.',toolCalls:[],finishReason:'stop'};
+                          if(rounds===2)return {content:'',toolCalls:[{id:'smoke',type:'function',function:{name:'fs_read',arguments:'{}'}}],finishReason:'tool_calls'};
+                          return {content:'The verified result is 42.',toolCalls:[],finishReason:'stop'};
+                        }}
+                      });
+                      if(rounds!==3||actions!==1||loop.stopReason!=='final')throw new Error('automatic continuation failed');
+                      const {setupBundledRuntimePath}=ChromeUtils.importESModule('resource:///modules/agentsidebar/host/BundledRuntimes.sys.mjs');
+                      Services.env.set('PATH',Services.env.get('SystemRoot')+'\\System32');
+                      setupBundledRuntimePath();
+                      const {getBackends}=ChromeUtils.importESModule('resource:///modules/agentsidebar/backends/Backends.sys.mjs');
+                      const runner=getBackends().workspace;
+                      const runtimeRoot=PathUtils.join(Services.dirsvc.get('GreD',Ci.nsIFile).path,'runtimes');
+                      for(const kind of ['node','python']){
+                        const executable=await runner._resolveExe(kind);
+                        if(PathUtils.parent(executable).toLowerCase()!==PathUtils.join(runtimeRoot,kind).toLowerCase())throw new Error('system runtime selected instead of bundled '+kind);
+                      }
+                      await IOUtils.writeUTF8(PathUtils.join(workspace,'bundled_local.py'),'value=42\n');
+                      const nr=await runner.runNode({code:'console.log(process.version)'},ctx);
+                      const pr=await runner.runPython({code:"import sys,json,ssl,sqlite3,pip,bundled_local; print(json.dumps({'python':sys.version.split()[0],'pip':pip.__version__,'local':bundled_local.value}))"},ctx);
+                      const np=await runner._spawn(PathUtils.join(runtimeRoot,'node','node.exe'),[PathUtils.join(runtimeRoot,'node','node_modules','npm','bin','npm-cli.js'),'--version'],{root:workspace});
+                      if(!nr.ok||!pr.ok||np.exitCode!==0)throw new Error('bundled runtime execution failed');
+                      const python=JSON.parse(pr.output.trim());
+                      if(nr.output.trim()!=='v'+expectedRuntimes.node.version||python.python!==expectedRuntimes.python.version||python.pip!==expectedRuntimes.pip.version||python.local!==42)throw new Error('bundled runtime version/import mismatch');
+                      const scripts=PathUtils.join(workspace,'子目录 scripts');
+                      await IOUtils.makeDirectory(scripts);
+                      await IOUtils.writeUTF8(PathUtils.join(scripts,'sibling_helper.py'),'value=43\n');
+                      await IOUtils.writeUTF8(PathUtils.join(scripts,'check.py'),'import sibling_helper; print(sibling_helper.value)\n');
+                      const sibling=await runner.runPython({file:'子目录 scripts/check.py'},ctx);
+                      if(!sibling.ok||sibling.output.trim()!=='43')throw new Error('script sibling import failed');
+                      const win=Services.wm.getMostRecentWindow('navigator:browser');
+                      await win.SidebarController.show('viewAgentSidebar');
+                      let sidebarTitle='';
+                      for(let i=0;i<100;i++){
+                        const sidebar=win.SidebarController.browser||win.document.getElementById('sidebar');
+                        sidebarTitle=sidebar?.contentDocument?.querySelector('.agent-panel__title')?.textContent?.trim()||'';
+                        if(sidebarTitle==='Web Reverse')break;
+                        await new Promise(resolve=>win.setTimeout(resolve,100));
+                      }
+                      if(sidebarTitle!=='Web Reverse')throw new Error('stale Windows sidebar title: '+sidebarTitle);
+                      return {passed:true,build:Services.appinfo.appBuildID,version:Services.prefs.getStringPref('extensions.browser-agent.version'),runtimes:{node:nr.output.trim(),npm:np.output.trim(),...python},checks:['Web Reverse brand','rendered sidebar title','roundtrip','dedup','scope','retention','allowlist','auto-continue','bundled-node','bundled-npm','bundled-python','bundled-pip','workspace-import','script-sibling-import']};
+                    })().then(done,e=>done({error:String(e),stack:e?.stack}));
+                    """, "args": [expected_runtimes], "newSandbox": False, "scriptTimeout": 60000,
                 })
                 result = result.get("value", result)
                 assert result.get("passed") is True, result
                 assert result["build"] == build_id and result["version"] == tag[1:]
                 report.update(runtime_build_id=result["build"], ledger_passed=True, ledger_checks=result["checks"])
+                report["bundled_runtimes"] = result["runtimes"]
                 wire.command("Marionette:Quit", {})
                 report["ledger_exit_code"] = process.wait(timeout=30)
                 assert report["ledger_exit_code"] == 0

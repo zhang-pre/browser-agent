@@ -2,5 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOZ_APP_DISPLAYNAME="Firefox Reverse"
+MOZ_APP_DISPLAYNAME="Web Reverse"
+# Retain the bundle identity used by existing installations and profiles.
 MOZ_MACBUNDLE_ID=browser-agent

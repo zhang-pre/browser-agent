@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "run_id": null,
+  "platform": "Windows",
+  "source_commit": "ab66b94ee9134d6d148bae95bef7871e3595feaa",
+  "package_sha256": "b44c61ab2816d8b4c0ba5271689c8e3992a47b7afedcea50a122b4d24539ddc4",
+  "binary_sha256": "19c6a44561ae20392b9a95999d031516dba9a5aba43ec2d057f27815d83a8e52",
+  "screenshot_exit_code": 0,
+  "screenshot_sha256": "2ab76d3723865b869a535e1b2663a603e033fb57ea2c3b96ad2e4bc7a4e69d8a",
+  "screenshot_size": 7304,
+  "runtime_build_id": "20261031032223",
+  "ledger_passed": true,
+  "ledger_checks": [
+    "roundtrip",
+    "dedup",
+    "scope",
+    "retention",
+    "allowlist",
+    "auto-continue",
+    "bundled-node",
+    "bundled-npm",
+    "bundled-python",
+    "bundled-pip",
+    "workspace-import",
+    "script-sibling-import"
+  ],
+  "bundled_runtimes": {
+    "node": "v24.22.2",
+    "npm": "11.19.1",
+    "python": "3.14.10",
+    "pip": "26.2.2",
+    "local": 42
+  },
+  "ledger_exit_code": 0
+}

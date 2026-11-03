@@ -11,6 +11,7 @@
 | `tools/` | 工具声明、注册和派发 | Tools、ToolRouter |
 | `backends/` | Firefox/本机能力实现、Actor、工作目录、记忆、Skills、环境管理及原生指纹策略 | Backends、PageBackend、NativeFingerprintPolicy |
 | `host/` | Firefox 特权适配和进程级 Runtime 装配 | AgentSession、FirefoxAgentRuntimeHost |
+| `mcp/` | 第三方 MCP 配置、协议、工具/资源/提示词管理与反向请求 | McpConfigStore、McpClient、McpManager、McpSessionRequests |
 
 ## 源码路径与安装路径
 

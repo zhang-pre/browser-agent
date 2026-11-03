@@ -19,6 +19,11 @@ on:
         description: "浏览器 BuildID"
         required: true
         type: string
+      ui_locale:
+        description: "候选包界面语言（例如 en-US 或 zh-CN）"
+        required: true
+        default: "en-US"
+        type: string
 
 permissions:
   # GitHub only exposes draft releases to identities with push access.
@@ -42,7 +47,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           if ($env:RELEASE_TAG -notmatch '^v[0-9][0-9A-Za-z.-]*$') { throw 'Invalid release tag' }
-          gh release download $env:RELEASE_TAG --pattern "browser-agent-$($env:RELEASE_TAG)-windows-x86_64.zip" --dir candidate
+          gh release download $env:RELEASE_TAG --pattern "web-reverse-$($env:RELEASE_TAG)-windows-x86_64.zip" --dir candidate
           if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
       - name: 原生启动、截图与 Ledger 验证
         env:
@@ -50,6 +55,7 @@ jobs:
           PACKAGE_SHA256: ${{ inputs.package_sha256 }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           EXPECTED_BUILD_ID: ${{ inputs.build_id }}
+          EXPECTED_UI_LOCALE: ${{ inputs.ui_locale }}
         run: python scripts/verify-windows-package.py
       - name: 保存验证报告
         if: always()

@@ -23,6 +23,7 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
 
 EXTRA_JS_MODULES.agentsidebar.host += [
     "modules/host/AgentSession.sys.mjs",
+    "modules/host/BundledRuntimes.sys.mjs",
     "modules/host/FirefoxAgentRuntimeHost.sys.mjs",
     "modules/host/FirefoxMcpService.sys.mjs",
     "modules/host/FirefoxMcpTransport.sys.mjs",

@@ -1,108 +1,117 @@
-# 发布与可见性策略
+# 构建产物与发布
 
-## 阶段
+## 直接下载 Windows 体验版
 
-| 阶段 | 仓库可见性 | Release 可见性 | 触发条件 |
-|------|-----------|----------------|----------|
-| **private**（当前） | 私有 | 私有 | 默认 |
-| **internal-test** | 私有 | 私有（邀请协作者可下载） | 至少 1 个核心模块跑通 |
-| **public-beta** | 公开 | 公开（标 prerelease） | 6 大模块全部可用 + 多端编译通过 |
-| **public-release** | 公开 | 公开（正式版） | 经过实战站点验证（如目标站点/NMPA 等） |
+[Web Reverse v0.24.1 Windows x64](https://github.com/zhang-pre/browser-agent/releases/tag/v0.24.1-web-reverse) 已提供 [EXE 安装版](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.exe) 和 [ZIP 便携版](https://github.com/zhang-pre/browser-agent/releases/download/v0.24.1-web-reverse/web-reverse-v0.24.1-windows-x86_64.zip)。无需自行编译；安装与首次配置见 [快速开始](../README.md#快速开始)。这是手动发布的已验证构建，完整记录见 [Windows 版本记录](releases/windows-v0.24.1-web-reverse/README.md)。
 
-## 渠道
+发布自动化位于本仓库 [release.yml](../.github/workflows/release.yml)，不要求另取私有 build 仓库。工作流是实现事实；仓库当前可见性和某个 Release 是否已发布不能从源码判断。
 
-主渠道：**本仓库的 GitHub Releases**。
+## 发布工作流
 
-- 单 release 单文件最大 2 GB，Firefox 二进制压缩后 80-200 MB，完全够用。
-- 私有仓库的 Releases 也是私有的——仅协作者可见/下载。
-- Release tag 命名：`v<firefox-upstream-major>.<minor>.<patch>-rN`，例如 `v135.0.0-r1`。
+仅通过 `workflow_dispatch` 手动触发，输入 `release_tag`（项目版本形如 `v0.24.1`）和可选 `build_all`。推 tag 不自动运行。
 
-## 产物清单
+- `create-release` 创建/更新草稿；tag 含 `-` 时标记 prerelease。
+- `build-mac` 使用自托管 runner，复用固定位置的已准备 Firefox 树。检查锁定基线与 Agent 父级注册，构建 React bundle、同步 additions，分别在 arm64/x86_64 对象目录构建与打包，并验证架构及 DMG 签名。
+- macOS 资产命名为 `web-reverse-<tag>-macos-arm64.dmg` 和 `web-reverse-<tag>-macos-x86_64.dmg`。arm64 的 `mozconfig.mac` 来自预备树，Intel 配置在 `configs/mozconfig.macos-x64`。
+- `build_all=true` 才启用托管 Windows/Linux 从零构建，作业设置 `continue-on-error: true`。上传使用 mach 原始包名；失败不阻止 macOS 作业。
 
-每次 release 应包含：
+自托管作业依赖已经打好原生接入的树，并不重新执行所有 Python 接入脚本。可选 Windows/Linux 路径目前也没有 React bundle 构建和 Phase B 接入步骤，不能据该作业存在就认定完整分析能力已经验收。发布前应核对实际包内资源与原生记录。
 
-```
-# 二进制（多端预编译包）
-browser-agent-<version>-linux-x64.tar.xz
-browser-agent-<version>-linux-x64.tar.xz.sha256
-browser-agent-<version>-macos-arm64.dmg
-browser-agent-<version>-macos-arm64.dmg.sha256
-browser-agent-<version>-macos-x64.dmg
-browser-agent-<version>-macos-x64.dmg.sha256
-browser-agent-<version>-windows-x64.zip
-browser-agent-<version>-windows-x64.zip.sha256
+当前工作流不生成 patched-source tarball、`SOURCES.md` 或每个安装包的 SHA256 文件，也不自动把草稿转成正式发布。早期文档中的这些项目属于未实现的发布设想。
 
-# 源码 tarball（已应用补丁，用户可跳过 bootstrap 直接 ./mach build）
-browser-agent-<version>-source.tar.xz
-browser-agent-<version>-source.tar.xz.sha256
+## 本地构建与打包
 
-# 元信息
-SOURCES.md         # 对应的 upstream firefox ref + 本仓库 commit
-CHANGELOG.md       # 本版相对上版的变更
-```
+从仓库源码构建的完整步骤见 [README](../README.md#源码构建)。主要产物位置：
 
-## 用户自己编译的两条路径
+| 路径/脚本 | 作用 |
+|---|---|
+| `upstream/obj-*/dist/` | mach 构建与打包输出 |
+| `scripts/package.sh` | 调用 `mach package`，复制匹配的 tar.xz/dmg/zip/exe/deb 到根目录 `dist/`，DMG 文件前缀为 `web-reverse-`，其他原始包名保留；可用 `DIST_DIR` 覆盖 |
+| `scripts/package-linux-deb.py` | 将 Linux tar.xz 转为带菜单入口、图标、独立 profile 的 `.deb`，并生成 SHA256 校验文件 |
+| `scripts/build-linux-arm64.sh`、`configs/mozconfig.linux-arm64` | 独立 Linux arm64 构建路径，不在 release 工作流矩阵中 |
+| `scripts/repack-zh-cn.sh`、`verify-zh-cn-stage.sh` | 简体中文重打包与 stage 检查 |
+| `scripts/macos-adhoc-sign-apps.sh`、`macos-verify-dmg.sh` | macOS ad-hoc 签名与包检查 |
 
-**为什么不直接把上游 firefox 源码 vendor 进 browser-agent？**
-源码 ~5 GB（不含历史）/ ~30 GB（含），超过 GitHub 仓库实用上限；上游每天数百 commit，同步成本天文数字；业界（camoufox / Brave / Tor Browser / LibreWolf / Mullvad）都用补丁集模式。
+没有承诺可下载的 patched-source 包；如果实际 Release 只有二进制，使用仓库构建路径。
 
-下面两条路径满足"用户想自己编"的需求：
+### Ubuntu 应用安装包
 
-### 路径 A：从仓库 clone
-
-适合想跟踪本仓库更新的开发者。
+已经编译完成时，在 Ubuntu/Debian 的仓库根目录执行（包括 WSL Ubuntu）：
 
 ```bash
-git clone <browser-agent>
-cd browser-agent
-./scripts/bootstrap.sh        # 拉上游 mozilla-firefox/firefox
-./scripts/apply-patches.sh    # 应用我们的补丁
-./scripts/build.sh            # ./mach build 包装
-./scripts/package.sh
+make package-deb
 ```
 
-依赖按 Mozilla 官方文档装：`./mach bootstrap` 会自动处理大部分。**完全不需要 browser-agent-build 仓库**。
+此命令先运行 `mach package`，再生成 `dist/web-reverse_<引擎版本>+build<BuildID>_<架构>.deb`。它不重新编译 C++ 或构建 React；修改源码后应先完成相应构建。打包需要 Python 3.12+、`dpkg-dev`、`binutils`，不需要 root。支持在 amd64/arm64 主机上打包相同架构的浏览器；系统库依赖和最低版本由本机 `dpkg-shlibdeps` 从 ELF 产物计算，不能据此承诺兼容更老的 Ubuntu。
 
-### 路径 B：下载 patched-source tarball
-
-适合一次性编一个固定版本的用户。
+已有便携包时可以直接转换，避免重复打包：
 
 ```bash
-# 从 Releases 下载 browser-agent-<version>-source.tar.xz
-tar -xf browser-agent-<version>-source.tar.xz
-cd browser-agent-<version>
-./mach bootstrap --no-interactive --application-choice browser
-./mach build
-./mach package
+python3 scripts/package-linux-deb.py dist/firefox-153.0a1.en-US.linux-x86_64.tar.xz
 ```
 
-跳过 bootstrap + patch 步骤，直接编。Mozilla 官方对自家源码也是这么发的。
+若 `dist/` 有多个 Linux tar.xz，必须指定具体输入；可用 `make package-deb LINUX_PACKAGE=/absolute/path/package.tar.xz`，或直接运行上述 Python 命令。`--output-dir` 可指定 `.deb` 输出目录。包版本取自实际产物中的 `application.ini`，不是当前源码的 Agent 版本。
 
-### 平台依赖参考
+安装时将以下路径换成实际输出文件名：
 
-- Linux：https://firefox-source-docs.mozilla.org/setup/linux_build.html
-- macOS：https://firefox-source-docs.mozilla.org/setup/macos_build.html
-- Windows：https://firefox-source-docs.mozilla.org/setup/windows_build.html
+```bash
+sudo apt install ./dist/web-reverse_<版本>_amd64.deb
+web-reverse
+```
 
-## CI 发布流程（规划）
+安装后可以从应用菜单打开 **Web Reverse**，使用 `web-reverse` 启动；旧命令 `browser-agent-mcp` 继续可用。为保证直接升级和复用已有数据，Debian 包标识仍为 `browser-agent-mcp`，程序文件仍在 `/opt/browser-agent-mcp/`，桌面入口 ID 和 remoting 名称也保持不变；默认 profile 仍在 `${XDG_CONFIG_HOME:-$HOME/.config}/browser-agent-mcp/profile`。可继续设置 `BROWSER_AGENT_PROFILE`，或显式传入 `-profile /absolute/path` 使用其他 profile。安装版不自动迁移开发 profile，也不自动设为系统默认浏览器。WSL 图形启动需要 WSLg 或可用的图形显示环境。
 
-1. `browser-agent-build/` 的 CI 在 browser-agent 打 tag 时触发。
-2. 矩阵编译四个平台，产物上传到 GitHub Releases drafts。
-3. 本人手工审核 + 发布。
+安装版禁用 Mozilla 自动更新，后续用新生成的 `.deb` 升级，保留定制内核与侧边栏。`run_node`、`npm_install`、`run_python` 等功能仍需要系统中的 Node.js/npm/Python；这些运行时不嵌入浏览器包。卸载使用 `sudo apt remove browser-agent-mcp`，用户 profile 会保留。
 
-## 私有阶段获取产物
+同时生成的 `firefox-*.tar.xz` 是便携包：解压后运行 `firefox/firefox`，需保留完整目录，不能只复制其中一个 ELF 可执行文件。便携包直接使用原始 Firefox 启动方式，不包含 `.deb` 的 profile 启动脚本或更新策略。
 
-私有阶段没有 public release。本人/协作者获取产物：
+### 改名与已有数据
 
-- 自己跑 `browser-agent-build/scripts/build-{linux,macos,windows}.sh`
-- 产物在 `browser-agent-build/dist/<platform>/`
+Web Reverse 的显示名称与存储身份分开维护：配置键、`browser-agent-agent` 数据目录、旧 `firefox-reverse` 路径兼容、会话导入格式和指纹配置标记均保留。`scripts/sync-additions.sh` 同步显示名称，并保持 macOS 的 `Firefox Reverse.app` 磁盘目录名及 `browser-agent` bundle ID；浏览器界面和 DMG 显示 Web Reverse。macOS 升级时应覆盖原安装位置，避免安装路径变化触发 Firefox 选择其他 profile。
 
-## 公开门槛清单
+因此，全局搜索仍会找到 `browser-agent`。`extensions.browser-agent.*` 是持久化配置键，`browser-agent-agent` 是会话和记忆库目录，`chrome://browser-agent` 是 LoginManager 的凭据标识；这些标识保留原值，保证升级后继续访问已有数据。本地仓库路径、实际 GitHub 链接、配套 MCP 项目名和历史记录也保留真实名称。不要用全局字符串替换消除这些兼容标识。
 
-切换 private → public-beta 前需要：
+开发版的 `mach run` 默认 profile 位于对象目录的 `tmp/profile-default/`，`make clean`、`mach clobber` 或手动删除对象目录都会清掉这份数据。清理前应退出浏览器，将完整 profile、用户目录下的环境资料及会话工作目录备份到构建树之外，并校验备份。需要从零编译时，不能只备份会话 JSON；Cookie、密钥、模型配置和 SQLite 数据库也属于 profile 数据。
 
-- [ ] 至少在 1 个目标平台编译跑通
-- [ ] 至少 3 个模块产出可用 trace（建议 property-trace / network-analysis / cookie-js-analysis）
-- [ ] License 明确（与 mozilla 上游 MPL-2.0 兼容）
-- [ ] README 去除内部测试相关的临时说明
-- [ ] 仓库内不含敏感字符串（密钥、内网地址）
+### Windows x64 安装包
+
+Windows 安装程序、快捷方式、“已安装的应用”和通知名称统一显示 Web Reverse。为继续识别旧安装及其 profile，内部 `BrandFullNameInternal`、注册键与默认安装位置沿用原值。源码同步会更新安装程序的显示值，不重命名内部注册键。
+
+外层自解压 EXE 使用 `scripts/brand-windows-sfx.py` 生成的独立 stub，将产品名、文件说明及安装图标同步为 Web Reverse，再拼接安装载荷。原始 7z stub 和其代码、清单等资源保持不变；脚本拒绝处理已签名或已附带载荷的输入。
+
+源码同步还会为 Windows 版本资源补上 `config.status` 依赖，避免增量构建沿用旧的 EXE 产品名。安装目标使用一次 `make` 调用同时传入 ZIP 和 SFX 路径；`mach build` 会逐个执行目标，不能把 `SFX_MODULE=...` 作为独立目标来覆盖前一个安装目标。
+
+在已准备 Firefox 源码树的 Linux/WSL 主机上，使用独立的 Windows 对象目录交叉编译，不复用 Linux 二进制：
+
+```bash
+sudo apt install msitools nsis libc6-i386 lib32gcc-s1 lib32stdc++6
+rustup target add x86_64-pc-windows-msvc
+make package-windows
+```
+
+`scripts/build-windows-x64.sh` 构建侧栏、同步 additions、执行原生接入脚本，随后使用 `configs/mozconfig.windows-x64` 下载 Windows SDK/工具链并编译、打包。默认使用 6 个编译任务，可通过 `BUILD_JOBS` 调整。首次编译会下载较大的工具链，耗时明显长于前端增量构建。
+
+Windows 脚本默认使用 `stable` Rust 工具链，以复用现有 Windows target 和编译缓存；可用 `WINDOWS_RUST_TOOLCHAIN` 指定其他已安装工具链。Windows 配置显式设置 `--host=x86_64-unknown-linux-gnu`，能够区分 Rust 1.98 的 Linux target，不需要随原生 Linux 构建切换到 1.97。已有对象目录会继续复用，实际重编范围由源码和配置依赖决定，不必先执行清理。
+
+产物位于 `dist/windows/<BuildID>/`：
+
+- `web-reverse-v<版本>-windows-x86_64.exe`：完整安装包，安装后从开始菜单打开 Web Reverse。
+- 同名 `.zip`：便携包，完整解压后运行 `firefox/firefox.exe`。
+- `SHA256SUMS`、`BUILD-INFO.json`、`README-WINDOWS.md`：校验值、构建来源与用户说明。
+- 工作区存在未提交改动时，另附 `SOURCE-CHANGES.patch`，避免把候选包误标为完全对应某个提交。
+
+Windows 配置显式启用 `--with-redist`，随应用携带 VC 运行库 DLL。包内还包括独立的 Node.js/npm 和 Python/pip，下载版本与 SHA256 固定在 `configs/windows-runtimes.json`。Agent 只为自身进程追加私有运行时目录，不修改系统 PATH；用户显式配置的解释器路径仍优先。Python 额外依赖默认落在当前工作目录的 `.python-packages`，也支持导入工作目录和脚本目录中的模块。
+
+整理产物时会检查 ZIP 完整性、Windows x64 可执行文件、当前 AgentLoop/后端模块、新 logo 和运行时清单。原生 Windows 启动验证是单独步骤，不能用交叉编译成功替代。此构建不执行代码签名。GitHub 发布前应提交对应源码并记录原生验证结果。
+
+此路径执行现有 Phase B 接入脚本，沿用其关闭 Windows 内容进程沙箱的行为，以允许原生追踪写入临时文件。候选包的用户说明会明确记录这一构建取舍。
+
+Web Reverse 新产物的校验值与原生验证结果见 [Windows v0.24.1 改名候选包记录](releases/windows-v0.24.1-web-reverse/README.md)。[旧候选包记录](releases/windows-v0.24.1/README.md) 保留供历史核对。
+
+## 包验证
+
+- `.github/workflows/validate-windows-package.yml` 是独立手动作业，输入候选 Release tag、SHA256、SourceStamp 和 BuildID，用 `scripts/verify-windows-package.py` 在 Windows 启动候选包并检查结果。
+- Linux 包检查使用 `scripts/verify-linux-package.sh`。
+- macOS 使用签名/DMG 验证脚本；签名检查不能替代原生功能测试。
+
+不要把 Node 自测通过、某次历史平台验证或上传成功当作新候选包完成验收。测试层次见 [tests/README.md](../tests/README.md)，历史变更保留在 [CHANGELOG](../CHANGELOG.md)。

@@ -1,43 +1,38 @@
-# 上游同步策略
+# 上游同步与基线
 
-## 上游
+当前 Firefox 基线为 `cebc55aab4d2661d1f6c2d1526362947ec4016c1`。`scripts/bootstrap.sh` 默认取此提交；发布工作流的 `FIREFOX_REV` 使用同一值。没有定时跟踪 main/ESR 的自动同步作业。
 
-- URL: https://github.com/mozilla-firefox/firefox
-- 基线版本：**待定**（建议从最近的 ESR 起步）
-- 同步频率：每 ESR 一次（约半年），或在 CVE 紧急时跟进
+## 获取源码
 
-## 跟踪策略
+在仓库根目录运行 `bash scripts/bootstrap.sh`。脚本执行 `git init`、`fetch --depth 1 origin <ref>` 和 detached checkout；可通过 `UPSTREAM_REPO`、`UPSTREAM_REF`、`UPSTREAM_DIR` 显式覆盖。
 
-1. **基线锁定**：在 `scripts/bootstrap.sh` 中写死上游 git ref（tag 或 commit）。
-2. **补丁可应用性**：每次升级基线，需要重新尝试 `apply-patches.sh`，处理冲突。
-3. **冲突归档**：上游 API 变化导致的补丁失效，归档到 `patches/<module>/legacy/` 并新建新版本补丁。
+若目标目录已有 `.git`，脚本直接跳过，**不会切换到新的 UPSTREAM_REF**。`make reset` 仅清理现有树，不更新基线，还会删除该树的未跟踪文件和本地改动；不要把它当作自动升级命令。
 
-## 子模块 vs 浅克隆
+## 在新目录验证升级
 
-- 不用 git submodule（体积大、维护复杂）。
-- 用 `git clone --depth 1 --branch <ref>` 浅克隆到 `upstream/`，`upstream/` 加入 `.gitignore`。
-
-## 补丁格式
-
-- 优先使用 `git format-patch` 生成的格式（含上下文），便于 `git am` 应用。
-- 补丁文件命名：`patches/<module>/NNNN-short-description.patch`，NNNN 为顺序号。
-
-## 升级流程
+先保留当前源码树和对象目录，用一个尚不存在的目录验证候选 ref：
 
 ```bash
-# 1. 备份当前补丁
-git tag patches-<old-version>
-
-# 2. 修改 bootstrap.sh 中的上游 ref
-vim scripts/bootstrap.sh
-
-# 3. 清理并重新拉取
-make reset
-make bootstrap
-
-# 4. 尝试应用补丁
-make patch  # 若失败，按模块手工解决冲突
-
-# 5. 重新生成补丁文件
-cd upstream && git format-patch <upstream-ref>..HEAD --output-directory ../patches/<module>/
+# 在仓库根目录执行；用实际候选提交替换 <candidate-ref>
+UPSTREAM_REF=<candidate-ref> UPSTREAM_DIR=upstream-candidate bash scripts/bootstrap.sh
+npm --prefix additions/browser/components/agent-sidebar install
+npm --prefix additions/browser/components/agent-sidebar run build
+UPSTREAM_DIR="$PWD/upstream-candidate" bash scripts/apply-patches.sh
+python3 scripts/apply-phase-b.py upstream-candidate
+UPSTREAM_DIR="$PWD/upstream-candidate" bash scripts/build.sh
 ```
+
+验证目录、对象目录和 profile 应与日常开发隔离。`upstream-candidate/` 不是默认忽略路径，不要把它加入版本控制。
+
+## 需要适配的入口
+
+1. `patches/agent-ui/*.patch` 和 `patches/branding/*.patch`，由 `git apply --index` 顺序应用，不是 `git am`。
+2. `scripts/apply-fingerprint-config.py`，由 `apply-patches.sh` 调用，依赖上游 C++/WebIDL/构建文件的文本锚点。
+3. `scripts/apply-phase-b.py`，单独接入 Interpreter 与 WebIDL 追踪。
+4. `additions/` 内的 Firefox API、resource URL、进程模型和 `moz.build` 注册。
+
+`.patch` 不保证可重复应用；两个 Python 脚本有已应用检测，但上游锚点变化仍需处理。仅通过 patch 检查不证明 Firefox 能编译或探针能工作。
+
+验证完成后再同步更新 bootstrap 的默认 ref 和工作流 `FIREFOX_REV`，保留源码/包版本对应关系。需运行 Node 回归、完整构建、目标平台的原生追踪、环境启动及 MCP 测试，见 [测试入口](../tests/README.md)。
+
+新增补丁仍使用 `patches/<module>/NNNN-short-description.patch`；可在专门的上游开发树中提交变更后使用 `git format-patch` 导出。不要把已经带入的其他模块或生成产物混入补丁。

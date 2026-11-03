@@ -1,5 +1,5 @@
 {
-  "_comment": "Example environment manager defaults. Runtime environment data lives outside profiles under ~/.browser-agent/environments.",
+  "_comment": "Environment layout/startup reference, not an automatically loaded config. EnvironmentBackend defines defaults; Marionette port is set through profile prefs and the launch environment. Runtime data lives under ~/.browser-agent/environments. See settings/README.md.",
   "schemaVersion": 1,
   "root": "~/.browser-agent/environments",
   "port": {
@@ -11,8 +11,6 @@
       "-marionette",
       "-remote-allow-system-access",
       "-no-remote",
-      "--marionette-port",
-      "<port>",
       "-profile",
       "<env/profile>"
     ],

@@ -1,22 +1,9 @@
-# patches/fingerprint/
+# 指纹配置
 
-可配置的浏览器指纹随机化。运行时配置来自 `settings/fingerprint.json`。
+本目录没有独立 `.patch`；接入由 `scripts/apply-fingerprint-config.py` 对上游实施，`apply-patches.sh` 会调用它。主要源码为 `additions/dom/base/FrxFingerprintConfig.*`、`FrxFingerprintSeed.h`、NavigatorUAData 及离线音频转换头文件。
 
-## 覆盖字段
+环境管理器保存每环境配置，同步到 profile；父进程加载后向子进程提供快照。浏览器不会自动把仓库 `settings/fingerprint.json` 当成全局入口，也不保证所有配置实时热更新。
 
-详见 [../../docs/features.md#1-指纹随机化fingerprint](../../docs/features.md)。
+新环境采用 `native-consistent`，保留原生 UA/显示/GPU 等边界，提供有实际消费者的语言、时区、渲染与可选离线音频设置。旧环境继续兼容；是否启用某字段取决于策略与消费者，不等于每次启动随机化所有字段。
 
-## 关键 Firefox 源文件
-
-- `dom/base/Navigator.cpp` / `Navigator.webidl`
-- `dom/base/Screen.cpp`
-- `dom/canvas/CanvasRenderingContext2D.cpp`
-- `dom/canvas/WebGLContext.cpp`
-- `dom/media/webaudio/AudioContext.cpp`
-- `intl/locale/LocaleService.cpp`
-
-## 实现思路
-
-1. 在 binding 层读取 `settings/fingerprint.json`（启动时一次）。
-2. 每次 getter 调用时返回配置覆盖值（若开启该字段）。
-3. 噪声类（canvas / audio）走每会话固定种子，避免同会话二次读取不一致暴露。
+详见 [环境管理](../../docs/fingerprint-environment-manager.md)、[原生一致策略](../../docs/native-fingerprint-consistency.md)。

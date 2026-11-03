@@ -460,7 +460,7 @@ export class ConversationStore {
       format: EXPORT_FORMAT,
       schemaVersion: EXPORT_SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
-      source: { app: "Firefox Reverse" },
+      source: { app: "Web Reverse" },
       conversation: {
         sourceThreadId: t.id,
         title: cleanTitle(t.title),
@@ -505,7 +505,7 @@ export class ConversationStore {
       }
     }
     if (!data || ![EXPORT_FORMAT, LEGACY_PRODUCT + "-conversation"].includes(data.format) || data.schemaVersion !== EXPORT_SCHEMA_VERSION) {
-      throw new Error("导入失败：不是受支持的 Firefox Reverse 会话文件");
+      throw new Error("导入失败：不是受支持的 Web Reverse 会话文件");
     }
     const src = data.conversation;
     if (!src || !Array.isArray(src.messages)) {

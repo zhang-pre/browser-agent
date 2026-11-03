@@ -1,5 +1,5 @@
 {
-  "_comment": "示例配置：复制为 proxy.json 并按需修改。proxy.json 不入库。",
+  "_comment": "历史代理字段参考，不自动读取。请通过环境管理器配置；当前 EnvironmentBackend 不消费 rules 或 username/password 自动认证字段，见 settings/README.md。",
 
   "enabled": false,
 

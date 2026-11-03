@@ -26,6 +26,9 @@ SELFTESTS=(
   selftest-agent-runtime-factory.mjs
   selftest-agent-steer.mjs
   selftest-agent-turn-orchestrator.mjs
+  selftest-auto-continue.mjs
+  selftest-final-response.mjs
+  selftest-bundled-runtimes.mjs
   selftest-config.mjs
   selftest-typography.mjs
   selftest-mcp-extensions.mjs
@@ -66,6 +69,8 @@ for test_file in "${SELFTESTS[@]}"; do
 done
 
 run node "$REPO_ROOT/scripts/tests/product-rename.mjs"
+run python3 "$REPO_ROOT/scripts/tests/product-branding.py"
+run python3 "$REPO_ROOT/scripts/tests/linux-launcher.py"
 run node "$REPO_ROOT/scripts/check-branding-assets.mjs"
 
 echo

@@ -8,7 +8,7 @@ core into privileged browser APIs.
 
 Sources are grouped under `additions/browser/components/agent-sidebar/modules/`:
 `runtime/`, `llm/`, `providers/`,
-`state/`, `tools/`, `backends/`, and `host/`.
+`state/`, `tools/`, `backends/`, `host/`, and `mcp/`.
 The [module directory guide](../additions/browser/components/agent-sidebar/modules/README.md)
 maps responsibilities and installation paths. All callers must import these grouped
 paths. Flat compatibility URLs have been removed; external scripts must migrate
@@ -29,7 +29,8 @@ to the grouped paths as well.
    operating system executes a tool.
 6. **LlmClient** is the stable facade over LlmProtocol, LlmStreamParser,
    LlmRequestExecutor, and LlmTransport. Fetch, abort controllers, and timers
-   are supplied through the transport port.
+   are supplied through the transport port. The subscription provider has a
+   dedicated CodexResponses adapter and authentication layer.
 7. **FirefoxAgentRuntimeHost** adapts Firefox timers, shutdown, ToolRouter,
    backends, transport, and opaque host contexts to the formal ports.
 8. **AgentSession** is the thin Firefox entry point. It creates the ports and
@@ -52,23 +53,32 @@ AgentPanel
 
 ## Context ownership
 
-- **state/ContextProjection** owns cross-turn model-history projection. The
-  conversation store retains the full UI history and the persisted projection.
-- **state/TurnContext** owns one turn's model budget, request trimming, sanitized
-  history, task anchor, steering retention, handoff summary and compaction rebuild.
-  Its injected client and callbacks keep it independent of Firefox and storage.
-- **runtime/AgentLoop** chooses safe boundaries and calls TurnContext; it still
-  owns LLM/tool execution, steering consumption, tool-result folding and loop guards.
-- **runtime/AgentTurnOrchestrator** supplies checkpoint/usage callbacks and owns
-  persistence, workspace handoff files and lifecycle. TurnContext never calls it
-  directly.
+- **state/UnifiedContext** owns the persisted event log, task card, model-facing
+  projection, compaction coverage and memory outbox. The conversation store keeps
+  full UI history as well as this unified state.
+- **state/UnifiedTurnContext** builds requests and applies one budget/compaction
+  path across user turns. It accounts for tool schemas, reasoning/provider state,
+  output reserve and a safety margin; incomplete tool groups cannot be committed.
+- **runtime/AgentLoop** chooses safe boundaries and drives the unified context;
+  it owns LLM/tool execution, steering consumption and loop guards.
+- **runtime/AgentTurnOrchestrator** supplies persistence, evidence validation,
+  checkpoint and usage callbacks. The context module uses injected callbacks
+  rather than Firefox APIs or direct storage access.
+- **state/ConversationMigration** imports older conversation state into the
+  unified format; ContextProjection and TurnContext are no longer source modules.
 
-TurnContext is created per loop segment. Its initialMessages seeds the loop;
-requestMessages(history) returns a bounded request view without mutating history;
-appendSteering(history, incoming) preserves corrections in the task anchor;
-compact(round, history) returns the retained or rebuilt history.
-The existing thresholds, handoff prompt and fallback behavior are unchanged.
-Cross-turn projection and within-turn compaction intentionally remain separate.
+Compaction uses the structured **MemoryContract** rather than Markdown heading
+parsing. The summary and pending memory outbox are saved together; Ledger applies
+batches with receipts so retries do not duplicate entries. The full source events
+remain available for evidence checks. **CompletionMemory** separately checks
+substantive successful runs for missing verified memory after showing the final
+answer; its failure does not turn the completed task into a failed run.
+
+`remember / recall` are the model-facing memory tools. Default recall and automatic
+injection are scoped to the current workspace; cross-workspace reads are explicit.
+Legacy Notes files are retained without being read or migrated. See the
+[memory contract guide](../additions/browser/components/agent-sidebar/modules/README.md#压缩与记忆交接)
+for evidence requirements, retry behavior and budget defaults.
 
 ## Steering the active run
 
@@ -102,11 +112,13 @@ including `selftest-agent-steer.mjs`. No real provider requests are needed.
 - Pass the selected window, workspace, and cancellation signal through tool
   context instead of reading global focus state.
 - Keep provider protocol conversion in the LLM protocol stack; keep API
-  credentials in `ConfigStore`.
+  Key profiles in `ConfigStore` and subscription credentials in the authentication
+  adapters. MCP credentials have their own host storage.
 - Keep session persistence in `AgentTurnOrchestrator`/conversation ports, not in the
   state kernel.
-- New privileged capabilities must be implemented as backends and registered in
-  `Tools.sys.mjs`; they must not be called directly by the decision engine.
+- New built-in privileged capabilities must be implemented as backends and
+  registered in `Tools.sys.mjs`; they must not be called directly by the decision
+  engine. Dynamic MCP capabilities enter through the MCP manager/host adapter.
 - A non-Firefox host can reuse the core by supplying timers, lifecycle hooks, an
   LLM transport, a router, and persistence adapters.
 

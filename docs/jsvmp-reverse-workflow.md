@@ -1,5 +1,7 @@
 # JSVMP 逆向工作流（实战 + 踩坑记录）
 
+> 历史案例记录：下文保留 2026 年 5 月的实验、比例和阶段判断，不代表当前版本的功能状态或通用成功率。当前 Agent 已集成离线工具与原生观测；使用入口见 [逆向 SOP](agent-reverse-sop.md) 和 [原生能力](agent-native-capabilities.md)。下文 `tools/*.js` 是仍保留的开发 CLI；浏览器内包装调用的版本在 `additions/browser/components/agent-sidebar/content/tools/*.cjs`。
+
 > 本文记录 browser-agent 第一个真实项目（目标站点 目标SDK 签名参数）的完整工作流、关键决策、和**踩过的坑**。
 > 后续做新 JSVMP 站点（淘宝 某接口 ua / 京东 _aladdin / 网易云 encSecKey / 美团 mtgsig 等）直接照这个走，**不要重蹈覆辙**。
 

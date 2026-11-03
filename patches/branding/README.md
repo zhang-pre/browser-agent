@@ -1,6 +1,6 @@
 # branding — 用 browser-agent 自有 logo 替换浏览器 app 图标
 
-把浏览器在 Dock / 访达 / 程序坞 / Cmd-Tab、新标签页、关于页里的名称和图标，从上游 unofficial / Nightly branding 换成 Firefox Reverse。
+把浏览器在 Dock / 访达 / 程序坞 / Cmd-Tab、新标签页、关于页里的名称和图标，从上游 unofficial / Nightly branding 换成 Web Reverse。
 
 ## 组成
 
@@ -11,9 +11,9 @@
    - `default16.png … default256.png`（窗口/关于页内嵌图标）
    - `firefox.ico` / `newtab.ico` / `newwindow.ico` / `pbmode.ico`（Windows 与标签页相关图标）
    - `content/about-logo.*`（新标签页、关于页和 onboarding 使用的 logo）
-   - `content/about-wordmark.svg` / `firefox-wordmark.svg`（Firefox Reverse 字标）
+   - `content/about-wordmark.svg` / `firefox-wordmark.svg`（Web Reverse 字标）
 
-上游新标签页不会读取 app 的 `firefox.icns` / `firefox.ico`，而是单独读取 `content/about-logo.*` 和 `firefox-wordmark.svg`。只替换应用图标会导致安装包名称已经是 Firefox Reverse，但首页仍显示 Nightly；这些资源必须一起同步。
+上游新标签页不会读取 app 的 `firefox.icns` / `firefox.ico`，而是单独读取 `content/about-logo.*` 和 `firefox-wordmark.svg`。只替换应用图标会导致安装包名称已经是 Web Reverse，但首页仍显示 Nightly；这些资源必须一起同步。
 
 ## 为什么要删 `CFBundleIconName`
 
@@ -51,6 +51,10 @@ killall Dock; killall Finder
 > 注：当前 mozconfig 未启用 official branding → 默认走 `browser/branding/unofficial/`，故图标资源放在 `unofficial/`。
 
 ## 构建前检查
+
+`scripts/sync-additions.sh` 会调用 `apply-product-branding.py`，更新已准备源码树里的侧栏入口，并保持 macOS 原有的 `Firefox Reverse.app` 安装路径。显示品牌为 Web Reverse；bundle ID、配置键和用户数据路径保留。Windows 的 `BrandFullName`、快捷方式、卸载和通知显示值使用 Web Reverse，`BrandFullNameInternal`、原注册键和安装位置继续保留。
+
+Windows 版本资源依赖 `config.status`，确保配置改名后重新生成 `.rc`/`.res` 并链接 EXE。外层 7z SFX 在拼接安装载荷前单独更新名称和图标；安装载荷与便携 ZIP 逐文件校验，本机检查另外验证外层 EXE、内层 setup、浏览器和辅助程序的产品名。
 
 ```bash
 node scripts/check-branding-assets.mjs

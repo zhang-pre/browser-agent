@@ -28,6 +28,7 @@ const thread = await store.createThread("rename compatibility");
 await store.appendMessage(thread.id, { role: "user", content: "preserved message" });
 const exported = await store.exportThread(thread.id);
 assert.equal(exported.format, "browser-agent-conversation");
+assert.equal(exported.source.app, "Web Reverse");
 for (const format of [exported.format, LEGACY_PRODUCT + "-conversation"]) {
   const imported = await store.importThread({ ...exported, format });
   assert.equal(imported.messages[0].content, "preserved message");

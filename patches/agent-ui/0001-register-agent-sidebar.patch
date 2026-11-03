@@ -164,7 +164,7 @@ index 6bd76b8607..cf6de23ca3 100644
  sidebar-menu-genai-chat-label =
    .label = AI chatbot
 +sidebar-menu-agent-label =
-+  .label = browser-agent-Agent
++  .label = Web Reverse
  sidebar-menu-history-label =
    .label = History
  sidebar-menu-synced-tabs-label =

@@ -25,6 +25,13 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 
 mkdir -p "$DIST_DIR"
-cp -v obj-*/dist/firefox-*.{tar.xz,dmg,zip,exe,deb} "$DIST_DIR/" 2>/dev/null || true
+shopt -s nullglob
+for artifact in obj-*/dist/firefox-*.{tar.xz,dmg,zip,exe,deb}; do
+  name="${artifact##*/}"
+  if [[ "$name" == *.dmg ]]; then
+    name="web-reverse-${name#firefox-}"
+  fi
+  cp -v "$artifact" "$DIST_DIR/$name"
+done
 
 echo "[package] artifacts → $DIST_DIR"
