@@ -18,8 +18,6 @@ Windows 10/11 x64 · v0.24.1 体验版 · 已内置 Node.js / npm / Python / pip
 
 ![Web Reverse 的 Windows 浏览器界面：左侧为本地接口演示页，右侧为内置 AI Agent](docs/images/web-reverse-windows.png)
 
-<p align="center"><sub>Windows 实际界面；截图使用本地演示页，尚未连接模型。</sub></p>
-
 ## 它能帮你做什么？
 
 一个接口在浏览器里能正常请求，换成自己的脚本却失败：`sign` 每次都变，`token` 不知道从哪来，算法还藏在混淆代码、JSVMP 或 WASM 里。
